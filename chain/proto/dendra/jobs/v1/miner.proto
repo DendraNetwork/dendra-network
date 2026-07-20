@@ -1,0 +1,17 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+option go_package = "dendra/x/jobs/types";
+
+// Miner defines the Miner message.
+message Miner {
+  string miner_id = 1;
+  string operator = 2;
+  string region = 3;
+  uint64 stake = 4;
+  string creator = 5;
+  uint64 demand = 6;
+  uint64 subsidy_claimed = 7;
+  string enc_pubkey = 8; // pub X25519 (hex 32o) ancree on-chain (anti-MITM MM-02, audit v5)
+  string vrf_pubkey = 9; // pub VRF Ed25519 (hex 32o) ancree on-chain (ECVRF dispo, CR-10)
+}

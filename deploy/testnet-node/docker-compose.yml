@@ -1,0 +1,44 @@
+# Dendra — all-in-one NODE to join a PUBLIC testnet (chain sync).
+# 3 steps:  cp .env.example .env  ->  fill in GENESIS_URL + SEEDS  ->  docker compose up -d --build
+#
+# This node SYNCS the chain from the public seeds (it does NOT launch its own genesis). To BECOME A
+# VALIDATOR (stake bond): see README.md, the manual 'create-validator' step.
+name: dendra-node
+
+services:
+  node:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.node
+    image: dendra/node:latest
+    environment:
+      CHAIN_ID: "${CHAIN_ID}"
+      MONIKER: "${MONIKER}"
+      GENESIS_URL: "${GENESIS_URL}"           # operator's public genesis.json
+      GENESIS_SHA256: "${GENESIS_SHA256:-}"   # expected sha256 (network-info.txt) -> anti-MITM check of the downloaded genesis
+      SEEDS: "${SEEDS}"                        # <node_id>@<host>:26656,...
+      PERSISTENT_PEERS: "${PERSISTENT_PEERS:-}"
+      DENDRA_VRF_KEY_FILE: "${DENDRA_VRF_KEY_FILE:-}"   # validator VRF key (vote-extensions), read by dendrad
+      # If the operator resets the network (new genesis), this node would otherwise keep running the OLD
+      # chain forever, reporting `catching_up: false` while frozen on a dead fork.
+      # node-join.sh now refuses to start on that divergence. Set this to 1 to let it wipe the local chain
+      # state and resync instead (KEYS ARE KEPT — only the chain data is dropped). Must be listed HERE:
+      # compose only forwards the variables it names, so an unlisted escape hatch is unreachable.
+      DENDRA_AUTO_RESET_ON_GENESIS_CHANGE: "${DENDRA_AUTO_RESET_ON_GENESIS_CHANGE:-0}"
+      # STATE-SYNC — nécessaire dès que la chaîne a subi un changement consensus-breaking : rejouer
+      # l'historique ferait recalculer un AppHash différent de celui signé, donc panic. Ces 3 valeurs
+      # viennent du network-info.txt de l'opérateur. Vides = replay classique (réseau neuf, sans risque).
+      # Listées ICI parce que compose ne transmet QUE ce qu'il nomme — une variable non listée n'atteint
+      # jamais le conteneur, et la garde qui en dépend serait inatteignable.
+      STATESYNC_RPC: "${STATESYNC_RPC:-}"
+      STATESYNC_TRUST_HEIGHT: "${STATESYNC_TRUST_HEIGHT:-}"
+      STATESYNC_TRUST_HASH: "${STATESYNC_TRUST_HASH:-}"
+    ports:
+      - "26656:26656"   # P2P (inbound: helps the network)
+      - "26657:26657"   # local RPC
+    volumes:
+      - "node-data:/root/.dendra"             # persistent chain state
+    restart: unless-stopped
+
+volumes:
+  node-data: {}

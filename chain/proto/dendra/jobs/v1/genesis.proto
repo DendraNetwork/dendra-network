@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "dendra/jobs/v1/beacon.proto";
+import "dendra/jobs/v1/commit.proto";
+import "dendra/jobs/v1/job.proto";
+import "dendra/jobs/v1/miner.proto";
+import "dendra/jobs/v1/params.proto";
+import "dendra/jobs/v1/pools.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/jobs/types";
+
+// GenesisState defines the jobs module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  repeated Miner miner_map = 2 [(gogoproto.nullable) = false];
+  repeated Job job_map = 3 [(gogoproto.nullable) = false];
+  Pools pools = 4;
+  repeated Commit commit_map = 5 [(gogoproto.nullable) = false];
+  repeated Beacon beacon_map = 6 [(gogoproto.nullable) = false];
+
+  // --- ÉTAT MANQUANT (champs 7+) -------------------------------------------------------------
+  // Le GenesisState s'arrêtait au champ 6 alors que le module tient 23 collections. Un export/import
+  // perdait donc 17 d'entre elles EN SILENCE. CINQ ne doivent PAS être transportées : quatre caches
+  // indexés par HAUTEUR (DecentralizedSeed*, BlockHash) et `available`, indexé par ÉPOQUE — après un
+  // genesis, ni une hauteur ni un index d'époque ne désignent plus rien. Les DOUZE autres portent de
+  // la VALEUR, des ÉCHÉANCES ou de l'AUTORISATION ; les perdre a des conséquences précises, énoncées
+  // champ par champ ci-dessous.
+
+  // VALEUR. Fee et burn RETENUS par job (fee-hold v2). Les coins restent au compte de module, mais
+  // sans ces deux tables plus rien ne dit à QUI ils reviennent ni quand les libérer : fonds orphelins.
+  repeated HeldAmount held_fee = 7 [(gogoproto.nullable) = false];
+  repeated HeldAmount held_burn = 8 [(gogoproto.nullable) = false];
+
+  // ÉCHÉANCES. Chaque entrée est un rendez-vous que l'EndBlocker doit honorer. Les perdre ne perd pas
+  // des coins directement — c'est pire : les jobs concernés ne se résolvent JAMAIS, donc leur escrow
+  // et leur rétention restent bloqués sans qu'aucune erreur ne soit levée.
+  repeated PendingEntry pending_reveal = 9 [(gogoproto.nullable) = false];
+  repeated PendingEntry pending_audit = 10 [(gogoproto.nullable) = false];
+  repeated PendingEntry pending_audit_resolve = 11 [(gogoproto.nullable) = false];
+  repeated PendingEntry pending_appeal_resolve = 12 [(gogoproto.nullable) = false];
+
+  // AUTORISATION. Comité d'audit ancré (ADR-032/033) : qui a le droit de voter. Absent, le tally est
+  // fail-closed — sûr, mais toute dispute en vol devient inerte.
+  repeated StringEntry audit_committee = 13 [(gogoproto.nullable) = false];
+  // Clés VRF des validateurs : sans elles, aucun contributeur à la graine -> anti-grinding INACTIF
+  // jusqu'à ce que chacun ré-ancre. Visible dans les logs, mais silencieux côté état.
+  repeated StringEntry validator_vrf_pubkey = 14 [(gogoproto.nullable) = false];
+
+  // ANTI-ABUS. Probation Sybil : remise à zéro, un mineur déjà connu repart avec un compteur neuf.
+  repeated Uint64Entry miner_optimistic_count = 15 [(gogoproto.nullable) = false];
+  // Fenêtre glissante d'échecs de disponibilité : la perdre efface l'historique qui arme le slash.
+  repeated Uint64Entry avail_fail_count = 16 [(gogoproto.nullable) = false];
+  repeated Uint64Entry avail_fail_window_start = 17 [(gogoproto.nullable) = false];
+  // Défi de disponibilité courant (les présences prouvées, elles, sont per-époque : cf. `reserved 19`).
+  string avail_challenge = 18;
+  // 19 = ancien `available`. RETIRÉ : sa clé est une ÉPOQUE, purgée à chaque frontière — un index
+  // d'époque ne désigne plus rien après un genesis. Numéro réservé pour ne jamais le réutiliser.
+  reserved 19;
+}
+
+// HeldAmount — montant retenu pour un job (fee-hold v2).
+message HeldAmount {
+  string job_id = 1;
+  uint64 amount = 2;
+}
+
+// PendingEntry — un rendez-vous d'un KeySet indexé par paire (hauteur, identifiant).
+//
+// ⚠️ `blocks_remaining` est RELATIF, pas une hauteur absolue. Les collections indexées par hauteur
+// ne sont pas transportées parce que les hauteurs repartent à zéro au genesis ; la même raison
+// s'applique ici. Une échéance exportée en absolu se
+// déclencherait des milliers de blocs trop tard sur une chaîne relancée à 1, et JAMAIS si la reprise
+// se fait au-dessus d'elle — l'EndBlocker matche la hauteur exacte (`NewPrefixedPairRange(h)`). On
+// transporte donc le TEMPS QU'IL RESTE À ATTENDRE, que l'import ré-ancre sur la hauteur de reprise.
+message PendingEntry {
+  int64 blocks_remaining = 1;
+  string id = 2;
+}
+
+// StringEntry / Uint64Entry — entrées génériques d'une Map clé-chaîne.
+message StringEntry {
+  string key = 1;
+  string value = 2;
+}
+
+message Uint64Entry {
+  string key = 1;
+  uint64 value = 2;
+}

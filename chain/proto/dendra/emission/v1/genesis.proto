@@ -1,0 +1,40 @@
+syntax = "proto3";
+package dendra.emission.v1;
+
+import "amino/amino.proto";
+import "dendra/emission/v1/params.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/emission/types";
+
+// GenesisState defines the emission module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+
+  // ÉTAT DU MOTEUR D'ÉMISSION. Il n'était pas transporté du tout, et `InitGenesis` réinitialisait
+  // INCONDITIONNELLEMENT la Réserve à sa valeur de genèse et l'époque à 0. Conséquences d'un simple
+  // export/import : une Réserve déjà dépensée revenait PLEINE (le même calendrier libéré deux fois) ;
+  // les pools travail/disponibilité non réclamés étaient effacés, donc les subventions dues aux
+  // mineurs disparaissaient pendant que les coins qui les adossaient se retrouvaient comptés comme
+  // Réserve ; et `last_epoch = 0` face à une hauteur déjà élevée déclenchait une époque au premier bloc.
+  //
+  // Le champ est NULLABLE À DESSEIN, et c'est toute la subtilité : proto3 ne distingue pas « absent »
+  // de « zéro » sur un scalaire, or une Réserve légitimement épuisée VAUT zéro. Un message optionnel
+  // rend la distinction lisible — ABSENT = chaîne neuve, on amorce le moteur ; PRÉSENT = reprise, on
+  // restitue exactement, zéros compris.
+  EmissionState state = 2;
+}
+
+// EmissionState — l'état du moteur, tel qu'il doit traverser un export/import.
+message EmissionState {
+  uint64 reserve = 1;        // solde restant du calendrier de libération
+  uint64 work_pool = 2;      // subventions travail libérées mais NON encore réclamées
+  uint64 avail_pool = 3;     // idem, disponibilité
+  uint64 security_pool = 4;  // part sécurité accumulée
+  uint64 last_epoch = 5;     // hauteur de la dernière époque exécutée (anti-rejeu du calendrier)
+  uint64 last_supply = 6;    // offre à la dernière époque -> le delta mesure la demande (burns)
+}

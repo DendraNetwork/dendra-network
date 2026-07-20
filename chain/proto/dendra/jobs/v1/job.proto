@@ -1,0 +1,30 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/jobs/types";
+
+// Job defines the Job message.
+message Job {
+  string job_id = 1;
+  string client = 2;
+  string miner_id = 3;
+  uint64 fee = 4;
+  string state = 5;
+  string creator = 6;
+  // INT-1 v0 — dispute (re-adjudication bondee). Champs OPTIONNELS (0/"" hors dispute).
+  string disputer = 7;       // qui a conteste le verdict
+  uint64 dispute_bond = 8;   // bond escrowe (udndr) a l'ouverture de la dispute
+  int64 dispute_height = 9;  // hauteur d'ouverture de la dispute
+  // INT-1 v0 inc.3 — preuve des slashs appliques au reglement (permet la RESTITUTION si une dispute
+  // est jugee VALIDE : ResolveDispute upheld re-credite ces stakes depuis la Tresorerie).
+  repeated SlashRecord slash_records = 10 [(gogoproto.nullable) = false];
+}
+
+// SlashRecord — un slash applique a un mineur lors du reglement d'un job (qui / combien).
+// Sert a INVERSER le slash si le verdict est conteste avec succes.
+message SlashRecord {
+  string miner_id = 1;
+  uint64 amount = 2;
+}

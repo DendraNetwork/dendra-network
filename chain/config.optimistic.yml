@@ -1,0 +1,129 @@
+# ============================================================================
+# config.optimistic.yml — GENESIS OPTIMISTE COMMITTÉ (P1.0 / D3)
+# ============================================================================
+# But : rendre la preuve de SLASH live REJOUABLE PAR UN TIERS depuis le dépôt.
+# Identique à config.yml, MAIS le bloc jobs.params active la vérification
+# optimiste + fee-hold (verification_mode=1, hold_bps=10000, timeouts N2-safe).
+#
+# Le config.yml par défaut reste en k=3 (redondant) : ce fichier séparé NE
+# change PAS le défaut ni les autres lanceurs. Lancer la démo :
+#   tr -d '\r' < dendra/onchain-staging/dendra_slash_demo.sh | bash
+# (le lanceur pose ce fichier comme genesis, sert, et prouve le slash).
+#
+# ⚠️ Garder synchronisé avec config.yml si ce dernier change (seul jobs.params
+#    diffère). Valeurs d'activation = celles du RUNBOOK-PROD-ACTIVATION §B/§C.
+# ============================================================================
+version: 1
+validation: sovereign
+default_denom: udndr
+build:
+  main: cmd/dendrad  # désambiguïse le main chaîne (cmd/dendra-vrf est un 2e main)
+accounts:
+- name: alice
+  coins:
+  - 2700000000000udndr      # 2,7 M — validateur (bond 1 M)
+- name: bob
+  coins:
+  - 100000000000udndr       # 0,1 M — float faucet (réduit de 3,3 M : la Réserve part dans x/emission)
+- name: communaute
+  coins:
+  - 3400000000000udndr      # 3,4 M (réduit de 0,1 M -> float faucet de bob)
+- name: equipe
+  coins:
+  - 500000000000udndr       # 0,5 M
+# RÉSERVE (33 % = 3,3 M DNDR) détenue par le COMPTE DE MODULE x/emission DÈS LE GENESIS (TK-02 / ADR-023).
+- name: emission_reserve
+  address: dendra1q6tym5h6cd3cxcqua9eflkf5rct8c6rsn92wrf
+  module_name: emission
+  module_permissions: []
+  coins:
+  - 3300000000000udndr      # 3,3 M — Réserve TK-02
+client:
+  openapi:
+    path: docs/static/openapi.json
+faucet:
+  name: bob
+  coins:
+  - 10000000udndr
+validators:
+- name: alice
+  bonded: 1000000000000udndr
+genesis:
+  app_state:
+    staking:
+      params:
+        bond_denom: udndr
+    # F3 (2026-07-10) : section mint SUPPRIMÉE — x/mint est dé-enregistré de l'app (zéro mint
+    # STRUCTUREL, garanti par le binaire). Une section pour module non enregistré ferait échouer le boot.
+    crisis:
+      constant_fee:
+        denom: udndr
+    gov:
+      params:
+        min_deposit:
+        - denom: udndr
+          amount: '100000000'
+        expedited_min_deposit:
+        - denom: udndr
+          amount: '200000000'
+    jobs:
+      params:
+        avail_epoch_blocks: "300"    # ADR-022 (internal audit 2026-06-27) : 16->300 (~5 min). La calibration du slash dispo
+                                     # SUPPOSE 300 ; à 16, une coupure honnête de 2 min = ~8 époques ratées >= k -> FAUX-SLASH.
+                                     # NB : change AUSSI la cadence de versement de l'AvailPool (16 s -> 5 min) = voulu (16 s = spam).
+        avail_payout_bps: "2000"
+        avail_require_demand: true   # V6-02 : anti-farming (seuls les mineurs ayant servi de la demande touchent l'AvailPool)
+        # --- ADR-022 PLEIN : disponibilité SLASHABLE (liveness), fenêtre SLIDING bitmask 64 bits (lot scaling
+        # 2026-07-01, remplace le tumbling -> plus de gaming du reset ; W<=64 exigé par Validate à l'armement).
+        # DORMANT (avail_slash_bps=0) jusqu'à la PREUVE LIVE de non-faux-positif au soft-launch (internal audit).
+        # ARMING (après preuve) = poser ATOMIQUEMENT, valeurs calibrées SLIDING
+        # (bench-results/avail-slash-calibration-sliding.json, PENDING validation internal audit — k=4/W=20 tumbling CADUC) :
+        # avail_deadline_blocks="150" (2,5 min, généreux), avail_fail_k="5", avail_fail_window="25" (chronique EXACTE
+        # 16%, coupure 20 min survécue), avail_slash_bps="500" (5% BRÛLÉ), avail_slash_max="0".
+        # Barre opérateur ~99% uptime (bleed honnête ~0,5%/an). Tous DORMANTS (0) ci-dessous d'ici là.
+        avail_slash_bps: "0"
+        avail_deadline_blocks: "0"
+        avail_fail_k: "0"
+        avail_fail_window: "0"
+        avail_slash_max: "0"
+        # --- D3 : ACTIVATION OPTIMISTE COMMITTÉE (slash live rejouable du repo) ---
+        verification_mode: "1"        # k=1 (primaire payé) + audit échantillonné + slash dur (ADR-025)
+        audit_sample_bps: "10000"     # 100 % AUDITÉ : slash VISIBLE/déterministe pour la démo (PROD = 1000 / 10 %)
+        dispute_window: "10"          # fenêtre avant adjudication (Validate exige >0 en mode 1)
+        audit_resolve_timeout: "120"  # N2 : > dispute_window ET ≫ 3×(grace×poll) pour block_time≈1s (cf. RUNBOOK §A)
+        hold_bps: "10000"             # N1 : fee-hold PLEIN → « jamais le bond » strict (honnête sous-plancher restituable)
+        appeal_window: "0"            # appel permissionless DORMANT (v1) ; >0 pour armer la révélation tardive
+        audit_min_quorum: "4"         # VETO N=5 (internal audit 2026-06-22) : slash dur SSI ≥4/5 verdicts "invalide" (=⌈2N/3⌉, ≤ AuditCommitteeSize=5). Tricheur blatant (comité unanime) reste slashé ; honnête mal-jugé par minorité protégé.
+        silence_slash_bps: "2000"     # T1.3 (internal audit 2026-06-26) : pénalité de SILENCE (liveness BORNÉE 20% du stake, vers Trésorerie ; récupérable SEULEMENT par dispute-vindication, PAS via gouvernance) sur le clawback no-quorum d'un primaire MUET -> muet -EV MÊME si l'audit n'atteint jamais le quorum (q=0), à audit 50% (cf. tokenomics/audit_ev_calibration.py + bench-results/audit-ev-calibration.json).
+    modelregistry:
+      models:
+        - id: "llama3.1:8b-instruct-q4_K_M"
+          quant: "Q4_K_M"
+          engine: "ollama"
+          hw_class: "consumer-gpu"
+          active: true
+        - id: "all-MiniLM-L6-v2"
+          engine: "sentence-transformers"
+          active: true
+    # DEVNET ACCÉLÉRÉ (démo/observable) — PAS le taux mainnet : vide la Réserve en ~mois (EM-05).
+    emission:
+      params:
+        reserve_release_bps: "2"
+        work_split_bps: "5000"
+        avail_split_bps: "2000"
+        work_gate_bps: "15000"
+        epoch_blocks: "300"
+    bank:
+      denom_metadata:
+      - description: Dendra — token de staking, frais et recompenses
+        denom_units:
+        - denom: udndr
+          exponent: 0
+          aliases:
+          - microdnd
+        - denom: dndr
+          exponent: 6
+        base: udndr
+        display: dndr
+        name: Dendra
+        symbol: DNDR

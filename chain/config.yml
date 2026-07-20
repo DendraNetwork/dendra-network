@@ -1,0 +1,98 @@
+version: 1
+validation: sovereign
+default_denom: udndr
+build:
+  main: cmd/dendrad  # désambiguïse le main chaîne (cmd/dendra-vrf est un 2e main)
+accounts:
+- name: alice
+  coins:
+  - 2700000000000udndr      # 2,7 M — validateur (bond 1 M)
+- name: bob
+  coins:
+  - 100000000000udndr       # 0,1 M — float faucet (réduit de 3,3 M : la Réserve part dans x/emission)
+- name: communaute
+  coins:
+  - 3400000000000udndr      # 3,4 M (réduit de 0,1 M -> float faucet de bob)
+- name: equipe
+  coins:
+  - 500000000000udndr       # 0,5 M
+# RÉSERVE (33 % = 3,3 M DNDR) détenue par le COMPTE DE MODULE x/emission DÈS LE GENESIS (TK-02 / ADR-023).
+# Adresse = authtypes.NewModuleAddress("emission"). Libérée -22 %/an par RunEpoch (BeginBlock) -> fee_collector.
+# Supply FIXE 10 M conservée : -3,2 M (bob) -0,1 M (communaute) = +3,3 M (emission). ZÉRO frappe, jamais.
+- name: emission_reserve
+  address: dendra1q6tym5h6cd3cxcqua9eflkf5rct8c6rsn92wrf
+  # module_name = déclare cette poche comme le VRAI ModuleAccount "emission" (auth.GenesisAccount, cf.
+  # app/genesis_account.go). L'adresse ci-dessus == authtypes.NewModuleAddress("emission") = sha256("emission")[:20]
+  # (vérifié bech32). Sans module_name, ignite crée une BaseAccount à cette adresse ; avec, le compte est
+  # typé ModuleAccount dès le genesis -> SendCoinsFromModuleToAccount (PayWork/PayAvail) part d'un compte
+  # DÉJÀ approvisionné. Permissions vides (cohérent app_config.go:95 : emission ne minte pas).
+  module_name: emission
+  module_permissions: []
+  coins:
+  - 3300000000000udndr      # 3,3 M — Réserve TK-02
+client:
+  openapi:
+    path: docs/static/openapi.json
+faucet:
+  name: bob
+  coins:
+  - 10000000udndr
+validators:
+- name: alice
+  bonded: 1000000000000udndr
+genesis:
+  app_state:
+    staking:
+      params:
+        bond_denom: udndr
+    # F3 (2026-07-10) : section mint SUPPRIMÉE — x/mint est dé-enregistré de l'app (zéro mint
+    # STRUCTUREL, garanti par le binaire). Une section pour module non enregistré ferait échouer le boot.
+    crisis:
+      constant_fee:
+        denom: udndr
+    gov:
+      params:
+        min_deposit:
+        - denom: udndr
+          amount: '100000000'
+        expedited_min_deposit:
+        - denom: udndr
+          amount: '200000000'
+    jobs:
+      params:
+        avail_epoch_blocks: "16"
+        avail_payout_bps: "2000"
+        avail_require_demand: true   # V6-02 : anti-farming (seuls les mineurs ayant servi de la demande touchent l'AvailPool)
+    modelregistry:
+      models:
+        - id: "llama3.1:8b-instruct-q4_K_M"
+          quant: "Q4_K_M"
+          engine: "ollama"
+          hw_class: "consumer-gpu"
+          active: true
+        - id: "all-MiniLM-L6-v2"
+          engine: "sentence-transformers"
+          active: true
+    # DEVNET ACCÉLÉRÉ (démo/observable) — PAS le taux mainnet : vide la Réserve en ~mois (EM-05).
+    # Défaut PROD (Go : epoch_blocks ≈ 1 an, bps=2200) = ~22 %/an. Ici = accéléré assumé.
+    emission:
+      params:
+        reserve_release_bps: "2"
+        work_split_bps: "5000"
+        avail_split_bps: "2000"
+        work_gate_bps: "15000"
+        epoch_blocks: "300"
+    bank:
+      denom_metadata:
+      - description: Dendra — token de staking, frais et recompenses
+        denom_units:
+        - denom: udndr
+          exponent: 0
+          aliases:
+          - microdnd
+        - denom: dndr
+          exponent: 6
+        base: udndr
+        display: dndr
+        name: Dendra
+        symbol: DNDR

@@ -1,0 +1,28 @@
+# Standalone NODE image (dendrad binary) to JOIN a public Dendra testnet and SYNC the chain.
+# Multi-stage: builds dendrad from chain, then a slim debian runtime. Build context = repository ROOT.
+# The image build has not been tested in CI; validate it on your host (see docker/README.md).
+# Tooling note: the .node extension may be treated as a Node.js binary by some tools; view this file with cat/xxd.
+
+# --- Stage 1: chain binaries ---
+FROM golang:1.25-bookworm AS chainbuild
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /chain
+COPY chain/ /chain/
+RUN ( go build -o /go/bin/dendrad ./cmd/dendrad ) \
+    || ( echo "dendrad build failed -> check ./cmd/dendrad in chain (see docker/README.md)"; exit 1 )
+# dendra-vrf is included in the image so VRF anchoring (keygen/prove) is possible from the
+# container (without it, a joiner would have to compile Go on the host to contribute to the decentralized seed).
+RUN ( go build -o /go/bin/dendra-vrf ./cmd/dendra-vrf ) \
+    || ( echo "dendra-vrf build failed -> check ./cmd/dendra-vrf in chain"; exit 1 )
+
+# --- Stage 2: node runtime ---
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl coreutils \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=chainbuild /go/bin/dendrad /usr/local/bin/dendrad
+COPY --from=chainbuild /go/bin/dendra-vrf /usr/local/bin/dendra-vrf
+COPY docker/node-join.sh /node-join.sh
+RUN chmod +x /node-join.sh
+EXPOSE 26656 26657 1317
+ENTRYPOINT ["/node-join.sh"]

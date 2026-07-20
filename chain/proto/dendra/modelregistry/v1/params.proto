@@ -1,0 +1,34 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/modelregistry/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "dendra/x/modelregistry/Params";
+  option (gogoproto.equal) = true;
+
+  // audit_judge_model — ADR-027 D4. ⚠️ CE CHAMP N'EST LU PAR AUCUN CHEMIN D'EXÉCUTION, et il ne faut
+  // PAS le câbler en l'état : sa définition CONTREDIT une propriété de sécurité mesurée depuis.
+  //
+  // Sa rédaction d'origine exigeait que TOUS les membres du comité d'audit utilisent le MÊME modèle,
+  // au motif que des modèles différents donneraient des verdicts incohérents. La mesure a montré le
+  // contraire : c'est l'HOMOGÉNÉITÉ qui est dangereuse, parce qu'elle rend les erreurs du juge
+  // CORRÉLÉES — un mono-modèle produit 1 à 19 % de faux-slash sur des mineurs honnêtes, taux que le
+  // mix (MoE + nemo) ramène à zéro. D'où l'hétérogénéité exigée par les gates C1/C3. Épingler un
+  // modèle canonique réintroduirait exactement le faux-slash corrélé qu'elle existe pour fermer.
+  //
+  // La primitive juste n'est pas UN identifiant mais une ALLOW-LIST : plusieurs modèles admis,
+  // modèles trop faibles interdits. Elle est aujourd'hui appliquée HORS CHAÎNE, par la sonde
+  // matérielle du lanceur (`deploy/hw_probe.sh`, `_is_allowed_judge`) — donc réelle, mais non
+  // consensuelle. **Ne pas affirmer publiquement que le juge est contraint par le modèle ON-CHAIN.**
+  //
+  // Arbitrage ouvert (internal audit) : (a) retirer ce champ et assumer l'allow-list hors chaîne ; (b) le
+  // remplacer par une allow-list on-chain (`repeated string`), ce qui exige une régén proto et
+  // déplace la garde dans le consensus. Tant que l'arbitrage n'est pas rendu, le champ reste INERTE
+  // — un paramètre inerte est moins nuisible qu'un paramètre qui impose la mauvaise propriété.
+  string audit_judge_model = 1;
+}

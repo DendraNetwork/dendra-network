@@ -1,0 +1,11 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+option go_package = "dendra/x/jobs/types";
+
+// Beacon defines the Beacon message.
+message Beacon {
+  string job_id = 1;
+  string seed = 2;
+  string creator = 3;
+}

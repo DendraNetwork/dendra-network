@@ -1,0 +1,21 @@
+# Image des services Python Dendra : relais, passerelle OpenAI, mineurs, exporter, CLI.
+# dendrad (binaire chaine) est repris de l'image 'dendra/chain' pour signer/interroger via DENDRA_NODE.
+# Build : docker compose build  (apres 'docker compose build chain' qui produit dendra/chain:latest)
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir cryptography requests prometheus_client
+
+WORKDIR /app
+COPY services/ /app/
+COPY docker/entrypoint-services.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && mkdir -p /data/keys
+
+# binaire de la chaine (les mineurs/clients shell-out vers dendrad). Necessite dendra/chain:latest construit avant.
+COPY --from=dendra/chain:latest /go/bin/dendrad /usr/local/bin/dendrad
+
+ENV DENDRA_RELAY="http://relay:8645" \
+    OLLAMA_ENDPOINT="http://ollama:11434" \
+    DENDRA_NODE="tcp://chain:26657" \
+    PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["/entrypoint.sh"]

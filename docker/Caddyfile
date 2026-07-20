@@ -1,0 +1,102 @@
+# Dendra — HTTPS reverse proxy (automatic Let's Encrypt certificates).
+#
+# Prerequisites (operator):
+#   1. DNS: three DNS-ONLY A records on Cloudflare (grey cloud, NOT proxied — Caddy needs the ACME
+#      HTTP-01/TLS-ALPN challenge to reach the VPS directly):
+#         api.dendranetwork.com    A  <VPS_IP>   (DNS only)
+#         chat.dendranetwork.com   A  <VPS_IP>   (DNS only)
+#         proof.dendranetwork.com  A  <VPS_IP>   (DNS only)
+#   2. Firewall: ports 80 and 443 open (80 = ACME challenge + HTTP->HTTPS redirect, 443 = HTTPS).
+#
+# Caddy then obtains + auto-renews certificates and reverse-proxies to the internal services over the
+# docker network. The upstream services stay HTTP inside the network; TLS is terminated here.
+
+{
+	email hello@dendranetwork.com
+}
+
+# En-têtes de sécurité communs. Déclarés en SNIPPET et importés au niveau de chaque site (donc hors
+# des `handle_path`) : ils s'appliquent ainsi à TOUTES les réponses, y compris les erreurs et les
+# préflights, sans interférer avec les blocs `header` CORS qui, eux, sont propres à chaque route.
+# Volontairement PAS de CSP ici : `api` sert du JSON (une CSP n'y protège rien) et `chat` sert une
+# application tierce (Open WebUI) qu'une CSP écrite à l'aveugle casserait. La CSP du site statique
+# vit dans `site/_headers`, écrite d'après ce que les pages font réellement.
+(security_headers) {
+	header {
+		# HTTPS obligatoire pendant 1 an. Pas de `preload` (irréversible à court terme).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Ne jamais laisser le navigateur deviner un type MIME.
+		X-Content-Type-Options "nosniff"
+		# Ne pas fuiter l'URL d'origine vers un tiers.
+		Referrer-Policy "no-referrer"
+		# Rien ici n'est destiné à être embarqué ; aucune page du site n'utilise d'iframe (vérifié).
+		X-Frame-Options "DENY"
+		# Retire la bannière de version du serveur (réduction d'empreinte).
+		-Server
+	}
+}
+
+# OpenAI-compatible gateway. Two entry points on the same host:
+#   /demo/*  PUBLIC showcase path used by the branded chat on the website. Caddy injects the Bearer
+#            key SERVER-SIDE, so the browser never sees it and no key can be scraped from the page.
+#            Deliberately unauthenticated: abuse is bounded by the gateway's free-tier daily quota
+#            (subsidised from Reserve, testnet tokens). Delete this block to close the public demo.
+#   /*       Normal integrator endpoint — bring your own key (Authorization: Bearer ...).
+api.dendranetwork.com {
+	import security_headers
+	handle_path /demo/* {
+		reverse_proxy gateway:8651 {
+			header_up Authorization "Bearer {$DENDRA_API_KEY}"
+		}
+	}
+	# Chain RPC / REST for BROWSER apps (web wallet, explorer): HTTPS + CORS so an https:// page can
+	# query the chain without mixed-content. Read-only public data — exactly what :26657 / :1317
+	# already serve; no key, no secrets. `/rpc*` (not `/rpc/*`) because CosmJS POSTs to the bare base.
+	# `>` = SET/REPLACE, not add. Tendermint/the REST API may already emit their own
+	# Access-Control-Allow-Origin; adding a second one makes the browser reject the response outright
+	# ("Failed to fetch") even though curl succeeds — exactly the symptom seen on the explorer page.
+	# Origin is "*" on purpose: these are READ-ONLY PUBLIC endpoints (no cookie, no auth, no secret —
+	# the same data the open RPC already serves on :26657/:1317). Restricting them buys nothing and
+	# breaks every legitimate front-end (preview deploys, www., local dev). The paid path (/demo) and
+	# the gateway keep their strict origin.
+	handle_path /rpc* {
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type"
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
+		reverse_proxy chain:26657
+	}
+	handle_path /rest* {
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type"
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
+		reverse_proxy chain:1317
+	}
+	# Network capacity registry: nodes POST their hardware probe here, the /network page GETs the
+	# aggregate. `handle` (not handle_path) — the upstream serves the /capacity path itself.
+	handle /capacity* {
+		reverse_proxy capacity:8092
+	}
+	handle {
+		reverse_proxy gateway:8651
+	}
+}
+
+# Public chat front-end (Open WebUI — accounts, gateway key held server-side).
+chat.dendranetwork.com {
+	import security_headers
+	reverse_proxy open-webui:8080
+}
+
+# The Proof — read-only verifiability feed (recent jobs / pools / VRF health, no secrets).
+proof.dendranetwork.com {
+	import security_headers
+	reverse_proxy proof:8090
+}

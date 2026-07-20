@@ -1,0 +1,22 @@
+# Noeud Cosmos Dendra TESTNET : binaire dendrad compile, lance en NATIF (dendrad start) avec un
+# genesis FIGE construit au 1er boot par entrypoint-chain.sh. Plus d'ignite au runtime.
+# Go 1.25 : go.mod declare 'go 1.25.10' + un bloc 'tool' (Go 1.24+) -> golang:1.22 echouait.
+FROM golang:1.25-bookworm
+
+# jq = patch du genesis (params jobs/emission + registre modeles) dans l'entrypoint. git = modules go.
+RUN apt-get update && apt-get install -y --no-install-recommends git curl build-essential ca-certificates jq \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /chain
+COPY chain/ /chain/
+# Binaire dendrad -> /go/bin (requis par Dockerfile.services COPY). FAIL-FAST : si le build casse, l'image
+# casse ici (au lieu de produire une image sans dendrad qui fait echouer le COPY plus loin).
+RUN cd /chain && go build -o /go/bin/dendrad ./cmd/dendrad
+# E4 / bootstrap VRF : dendra-vrf (keygen/prove/pubkey) dans l'image -> l'entrypoint auto-ancre la cle VRF du validateur.
+RUN cd /chain && go build -o /go/bin/dendra-vrf ./cmd/dendra-vrf
+
+COPY docker/entrypoint-chain.sh /entrypoint-chain.sh
+RUN chmod +x /entrypoint-chain.sh
+
+EXPOSE 26657 26656 1317 9090
+ENTRYPOINT ["/entrypoint-chain.sh"]

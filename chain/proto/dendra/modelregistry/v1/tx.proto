@@ -1,0 +1,69 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "dendra/modelregistry/v1/model.proto";
+import "dendra/modelregistry/v1/params.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/modelregistry/types";
+
+// Msg defines the Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // UpdateParams defines a (governance) operation for updating the module
+  // parameters. The authority defaults to the x/gov module account.
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+
+  // RegisterModel : enregistre/active un modèle autorisé (gouvernance).
+  rpc RegisterModel(MsgRegisterModel) returns (MsgRegisterModelResponse);
+
+  // DeregisterModel : désactive un modèle (gouvernance).
+  rpc DeregisterModel(MsgDeregisterModel) returns (MsgDeregisterModelResponse);
+}
+
+// MsgUpdateParams is the Msg/UpdateParams request type.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "dendra/x/modelregistry/MsgUpdateParams";
+
+  // authority is the address that controls the module (defaults to x/gov unless overwritten).
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // params defines the module parameters to update.
+  //
+  // NOTE: All parameters must be supplied.
+  Params params = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// MsgUpdateParamsResponse defines the response structure for executing a
+// MsgUpdateParams message.
+message MsgUpdateParamsResponse {}
+
+// MsgRegisterModel — enregistre/active un modèle (autorité = gouvernance).
+message MsgRegisterModel {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "dendra/x/modelregistry/MsgRegisterModel";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  Model model = 2 [(gogoproto.nullable) = false];
+}
+
+message MsgRegisterModelResponse {}
+
+// MsgDeregisterModel — désactive un modèle par son id (autorité = gouvernance).
+message MsgDeregisterModel {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "dendra/x/modelregistry/MsgDeregisterModel";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string id = 2;
+}
+
+message MsgDeregisterModelResponse {}

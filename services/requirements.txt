@@ -1,0 +1,3 @@
+cryptography>=42.0
+requests>=2.31
+# pytest pour les tests (optionnel) : pip install pytest

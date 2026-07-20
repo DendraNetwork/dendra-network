@@ -1,0 +1,15 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+option go_package = "dendra/x/jobs/types";
+
+// Commit defines the Commit message.
+message Commit {
+  string job_id = 1;
+  string prompt_commit = 2;
+  string result_commit = 3;
+  string kind = 4;
+  string creator = 5;
+  string model_id = 6; // modèle servi (doit être enregistré+actif si enforce_model_registry)
+  string weights_hash = 7; // hash des poids REELLEMENT servis (lie au registre, NEW-MR-03)
+}

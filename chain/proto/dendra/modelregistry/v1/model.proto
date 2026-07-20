@@ -1,0 +1,21 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/modelregistry/types";
+
+// Model — un modèle d'inférence AUTORISÉ on-chain (attestation gouvernée).
+// Le `weights_sha256` est l'ancre de confiance : la chaîne ne paie que de l'inférence
+// dont le modèle servi correspond à un Model enregistré + actif (application côté x/jobs).
+message Model {
+  string id = 1;             // identifiant (ex: "llama3.1:8b-instruct-q4_K_M")
+  string weights_sha256 = 2; // hash des poids (content-addressed ; digest Ollama/HF)
+  string quant = 3;          // quantification (ex: "Q4_K_M")
+  string engine = 4;         // moteur + version (ex: "ollama 0.x" / "llama.cpp build")
+  string hw_class = 5;       // classe matérielle indicative
+  bool active = 6;           // autorisé actuellement
+  // INT-8 — ancrage Hugging Face (optionnel) : identité de modèle REPRODUCTIBLE + auditable.
+  string hf_repo = 7;        // repo HF (ex: "org/Llama-3.1-8B-Instruct-GGUF")
+  string hf_revision = 8;    // révision IMMUABLE (commit SHA / tag) — REQUISE si hf_repo fourni
+}

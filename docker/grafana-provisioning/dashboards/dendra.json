@@ -1,0 +1,1032 @@
+{
+ "title": "Dendra — réseau",
+ "uid": "dendra-network",
+ "schemaVersion": 39,
+ "version": 1,
+ "editable": true,
+ "refresh": "5s",
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "timezone": "browser",
+ "panels": [
+  {
+   "id": 1,
+   "type": "stat",
+   "title": "Hauteur de bloc",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "green"
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_block_height",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Mineurs enregistrés",
+   "gridPos": {
+    "x": 6,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_miners_total",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "stat",
+   "title": "Tokens distribués (Σ soldes)",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "green"
+     },
+     "unit": "none"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_miners_total_balance_token",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "stat",
+   "title": "Trésorerie (slashes)",
+   "gridPos": {
+    "x": 18,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "orange"
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_pool_treasury",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Solde des mineurs (token) — gains au fil du temps",
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 14,
+    "h": 9
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_miner_balance_token",
+     "legendFormat": "{{miner}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "type": "bargauge",
+   "title": "Stake (bond) des mineurs",
+   "gridPos": {
+    "x": 14,
+    "y": 4,
+    "w": 10,
+    "h": 9
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "continuous-GrYlRd"
+     },
+     "min": 0,
+     "max": 2000
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_miner_stake",
+     "legendFormat": "{{miner}}",
+     "instant": true,
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "stat",
+   "title": "R = reglement / emission  (PROXY FARMABLE - alerte si <1, PAS un STOP auto)",
+   "gridPos": {
+    "x": 0,
+    "y": 13,
+    "w": 8,
+    "h": 6
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "decimals": 3,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "value": null,
+        "color": "red"
+       },
+       {
+        "value": 1,
+        "color": "green"
+       }
+      ]
+     }
+    }
+   },
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_r_settlement",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "R reglement/emission — tendance (PROXY farmable ; rouge = alerte, pas preuve de bulle)",
+   "gridPos": {
+    "x": 8,
+    "y": 13,
+    "w": 16,
+    "h": 6
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 10,
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "value": null,
+        "color": "red"
+       },
+       {
+        "value": 1,
+        "color": "green"
+       }
+      ]
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_r_settlement",
+     "legendFormat": "R (reglement/emission)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "Reglement credite (Demand, proxy farmable) vs Emission liberee (DNDR)",
+   "gridPos": {
+    "x": 0,
+    "y": 19,
+    "w": 24,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_demand_total_dndr",
+     "legendFormat": "Demand (reglement credite)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "dendra_emission_released_dndr",
+     "legendFormat": "emission liberee",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "type": "stat",
+   "title": "VRF — anti-grinding du comite (ROUGE = repli legacy, alea NON-decentralise -> un validateur doit ancrer sa cle VRF ; precondition d'ouverture)",
+   "gridPos": {
+    "x": 0,
+    "y": 27,
+    "w": 24,
+    "h": 5
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "OK (VRF decentralisee)"
+        },
+        "1": {
+         "text": "GRINDING INACTIF (repli legacy)"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "value": null,
+        "color": "green"
+       },
+       {
+        "value": 1,
+        "color": "red"
+       }
+      ]
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_committee_grinding_inactive",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 11,
+   "type": "stat",
+   "title": "R2 = frais EXTERNES a finalite / emission (durci : sans free-tier, sans self-dealing direct, sans claw/pending — PAS une preuve de traction, cf. docs/R-METRIQUE.md)",
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 8,
+    "h": 6
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "decimals": 3,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "value": null,
+        "color": "red"
+       },
+       {
+        "value": 1,
+        "color": "green"
+       }
+      ]
+     }
+    }
+   },
+   "options": {
+    "colorMode": "background",
+    "graphMode": "area"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_r2_external",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "type": "timeseries",
+   "title": "R2 tendance + REGLE STOP pre-committee (breach soutenu 14 j au testnet incentive => gel des recompenses par gouvernance)",
+   "gridPos": {
+    "x": 8,
+    "y": 32,
+    "w": 16,
+    "h": 6
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 10,
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "value": null,
+        "color": "red"
+       },
+       {
+        "value": 1,
+        "color": "green"
+       }
+      ]
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_r2_external",
+     "legendFormat": "R2 (externe, finalise)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "dendra_r2_stop_breach",
+     "legendFormat": "breach seuil STOP (1 = sous le seuil)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 13,
+   "type": "timeseries",
+   "title": "R2 — transparence du numerateur : jobs par classe (counted / pending / clawed / subsidized / operator_client / unpaid)",
+   "gridPos": {
+    "x": 0,
+    "y": 38,
+    "w": 24,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_r2_jobs",
+     "legendFormat": "{{bucket}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 14,
+   "type": "timeseries",
+   "title": "SCALE — debit regle (jobs counted/min, rate 10m) vs nb de mineurs (LOT 4.2 ; le debit multi-GPU PROUVE reste l'artefact debit-*.json)",
+   "gridPos": {
+    "x": 0,
+    "y": 45,
+    "w": 12,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(dendra_r2_jobs{bucket=\"counted\"}[10m]) * 60",
+     "legendFormat": "jobs counted / min",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "dendra_miners_total",
+     "legendFormat": "mineurs enregistres",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 15,
+   "type": "timeseries",
+   "title": "ANTI-SYBIL — croissance des identites (mineurs, vagues suspectes) + jobs clawed (LOT 4.2 ; clusters IP/ASN = revue manuelle au snapshot, pas mesurable on-chain)",
+   "gridPos": {
+    "x": 12,
+    "y": 45,
+    "w": 12,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "dendra-prom"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "delta(dendra_miners_total[1h])",
+     "legendFormat": "nouveaux mineurs / h",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "dendra_r2_jobs{bucket=\"clawed\"}",
+     "legendFormat": "jobs clawed (cumul)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    },
+    {
+     "refId": "C",
+     "expr": "dendra_r2_jobs{bucket=\"operator_client\"}",
+     "legendFormat": "self-dealing detecte (cumul)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "⭐ LANCEMENT PUBLIC — triplet live + hétérogénéité (C1/C3)",
+   "gridPos": {
+    "x": 0,
+    "y": 46,
+    "w": 24,
+    "h": 1
+   },
+   "id": 50,
+   "collapsed": false
+  },
+  {
+   "type": "stat",
+   "title": "Slash DUR au quorum (doit = 0)",
+   "description": "C3 : au lancement (réseau réputé honnête) tout slash dur = INCIDENT. Composante 1 du triplet.",
+   "id": 51,
+   "gridPos": {
+    "x": 0,
+    "y": 47,
+    "w": 6,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_hard_slash_jobs_total",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     },
+     "color": {
+      "mode": "thresholds"
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Honnêtes saignés — SlashRecords",
+   "description": "Composante 2 du triplet : ponctions de stake (dur OU clawback léger). Détail montant ci-dessous.",
+   "id": 52,
+   "gridPos": {
+    "x": 6,
+    "y": 47,
+    "w": 6,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_slash_records_total",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     },
+     "color": {
+      "mode": "thresholds"
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Audits NON résolus (instantané)",
+   "description": "Composante 3 du triplet. Persistant>0 = timeout trop court (calibrer AUDIT_RESOLVE_TIMEOUT).",
+   "id": 53,
+   "gridPos": {
+    "x": 12,
+    "y": 47,
+    "w": 6,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_audit_unresolved",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 1
+       },
+       {
+        "color": "red",
+        "value": 5
+       }
+      ]
+     },
+     "color": {
+      "mode": "thresholds"
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Modèles-juges distincts (C1 : ≥2)",
+   "description": "Hétérogénéité par config. <2 = comité corrèle ses erreurs → NE PAS annoncer.",
+   "id": 54,
+   "gridPos": {
+    "x": 18,
+    "y": 47,
+    "w": 6,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_judge_models_distinct",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 2
+       }
+      ]
+     },
+     "color": {
+      "mode": "thresholds"
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Marge de veto (max invalide, hors quorum)",
+   "description": "Distance au slash (quorum=4). ≥3 = à un flip → investiguer prompt/juge.",
+   "id": 55,
+   "gridPos": {
+    "x": 0,
+    "y": 53,
+    "w": 6,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_veto_margin_max_invalid",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 3
+       },
+       {
+        "color": "red",
+        "value": 4
+       }
+      ]
+     },
+     "color": {
+      "mode": "thresholds"
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Verdicts par modèle-juge (diversité C1)",
+   "id": 56,
+   "gridPos": {
+    "x": 6,
+    "y": 53,
+    "w": 9,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_judge_verdicts",
+     "legendFormat": "{{model}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    }
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Saignée cumulée (DNDR)",
+   "description": "Montant brut des SlashRecords. Au lancement honnête : 0.",
+   "id": 57,
+   "gridPos": {
+    "x": 15,
+    "y": 53,
+    "w": 9,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "dendra_launch_slash_amount_total_dndr",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "dendra-prom"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     },
+     "color": {
+      "mode": "thresholds"
+     }
+    }
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "graphMode": "area"
+   }
+  }
+ ]
+}

@@ -1,0 +1,70 @@
+# Dendra — all-in-one MINER to join a PUBLIC testnet.
+# 3 steps:  cp .env.example .env   ->   fill in the public endpoints   ->   docker compose up -d --build
+#
+# This package does NOT launch a chain: it runs ONLY your GPU (Ollama) + the miner client, which
+# connect to the operator's PUBLIC RPC/relay/faucet. The model is downloaded LOCALLY on THIS machine
+# (never centralized) then served by your GPU -- this is the condition for decentralization/privacy/verification.
+name: dendra-miner
+
+services:
+  # Your local inference engine (GPU). The model lives in the 'ollama-models' volume on YOUR machine.
+  ollama:
+    image: ollama/ollama:latest
+    volumes: ["ollama-models:/root/.ollama"]
+    # --- NVIDIA GPU: UNCOMMENT (nvidia-container-toolkit required on the host) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: ["gpu"] }]
+    restart: unless-stopped
+
+  # One-shot: downloads the PINNED model LOCALLY before mining (must match the on-chain registry).
+  model-init:
+    image: ollama/ollama:latest
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'until ollama list >/dev/null 2>&1; do echo "waiting for Ollama..."; sleep 2; done;
+         echo "LOCAL download of model ${DENDRA_MODEL_ID} (~5 GB, one time only)...";
+         ollama pull "${DENDRA_MODEL_ID}";
+         echo "LOCAL download of the verification embedder ${DENDRA_EMBED_API_MODEL:-nomic-embed-text} (~270 MB)...";
+         ollama pull "${DENDRA_EMBED_API_MODEL:-nomic-embed-text}"'
+    restart: "no"
+
+  # The miner client: creates its key, funds itself at the faucet, registers on-chain (SIGNS itself), then
+  # loops (receives assigned jobs -> decrypts in memory -> infers on Ollama -> returns sealed -> anchors the commit).
+  miner:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.miner
+    image: dendra/miner:latest
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    environment:
+      DENDRA_NODE: "${DENDRA_NODE}"        # public chain RPC (sign/query)
+      DENDRA_RELAY: "${DENDRA_RELAY}"      # public blind relay (E2E-encrypted jobs)
+      FAUCET: "${FAUCET}"                  # public faucet (miner self-funding)
+      OLLAMA_ENDPOINT: "http://ollama:11434"
+      DENDRA_MODEL_ID: "${DENDRA_MODEL_ID}"
+      BACKEND: "ollama"
+      DENDRA_EMBED_MODE: "${DENDRA_EMBED_MODE:-backend}"          # real SEMANTIC verification (not bag-of-words)
+      DENDRA_EMBED_API_MODEL: "${DENDRA_EMBED_API_MODEL:-nomic-embed-text}"
+      # Optional: miner + audit committee (reveal/judge workers).
+      # DORMANT by default (0). DENDRA_JUDGE_ENDPOINT = the JUDGE's Ollama (empty = the service's own).
+      DENDRA_MINER_JUDGE: "${DENDRA_MINER_JUDGE:-0}"
+      DENDRA_JUDGE_ENDPOINT: "${DENDRA_JUDGE_ENDPOINT:-}"
+      # A judge MUST carry its judge model on-chain so committee-model DIVERSITY is measurable (C3 gate /
+      # ADR-031). Without these, a judge joining via this kit falls back to the default model and dilutes
+      # the on-chain proxy. Set both to your judge model (>=26 GB RAM -> qwen3:30b-a3b MoE; else mistral-nemo).
+      DENDRA_JUDGE_MODEL_OVERRIDE: "${DENDRA_JUDGE_MODEL_OVERRIDE:-}"
+      DENDRA_JUDGE_MODEL_ID: "${DENDRA_JUDGE_MODEL_ID:-}"
+    command: ["miner", "${MINER_ID}"]
+    volumes: ["miner-keys:/data/keys"]     # persistent IDENTITY -> back up this volume
+    restart: unless-stopped
+
+volumes:
+  ollama-models: {}
+  miner-keys: {}

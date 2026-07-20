@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Dendra Wallet</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e8eaed; --muted:#9aa2b1; --accent:#4f7cff; --accent2:#2b8a3e;
+    --danger:#e5484d; --warn:#e8890c; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:760px;margin:0 auto;padding:24px 18px 60px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+  .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4f7cff,#2b8a3e);display:grid;place-items:center;font-weight:800;color:#fff}
+  h1{font-size:20px;margin:0;font-weight:700}
+  .net{margin-left:auto;font-size:12px;color:var(--muted)}
+  .banner{background:#2a1f14;border:1px solid #5a3d16;color:#f0c48a;border-radius:10px;padding:9px 12px;font-size:12.5px;margin:14px 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .card h2{font-size:14px;margin:0 0 12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 5px}
+  input,textarea,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:10px 12px;font:inherit;font-size:14px}
+  textarea{resize:vertical;min-height:64px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:0}
+  button{cursor:pointer;border:0;border-radius:9px;padding:10px 14px;font:inherit;font-weight:600;font-size:14px;background:var(--accent);color:#fff}
+  button.sec{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .addr{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all}
+  .bal{font-size:30px;font-weight:800;margin:4px 0}
+  .bal small{font-size:15px;color:var(--muted);font-weight:600}
+  .muted{color:var(--muted)}
+  .hidden{display:none}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;max-width:90%;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  .toast.ok{border-color:var(--accent2)} .toast.err{border-color:var(--danger)}
+  .mnem{background:var(--panel2);border:1px dashed var(--warn);border-radius:10px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.9;word-spacing:6px}
+  .k{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .k:last-child{border:0}
+  .small{font-size:12px}
+  footer{color:var(--muted);font-size:12px;text-align:center;margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">D</div>
+    <h1>Dendra Wallet</h1>
+    <span class="net" id="netLabel">testnet</span>
+  </header>
+
+  <div class="banner">
+    <b>Testnet wallet.</b> $DNDR is a utility token with <b>no monetary value</b> (the network is resettable).
+    Keys live in this browser tab only. <b>Create a fresh wallet here — never import a recovery
+    phrase you use anywhere else</b>, even one that is empty today: an address you reuse elsewhere
+    can receive real funds tomorrow.
+  </div>
+
+  <!-- NETWORK -->
+  <div class="card">
+    <h2>Network</h2>
+    <div class="row">
+      <div>
+        <label>RPC endpoint (Tendermint :26657)</label>
+        <input id="rpc" value="https://api.dendranetwork.com/rpc"/>
+      </div>
+      <div>
+        <label>REST endpoint (:1317)</label>
+        <input id="rest" value="https://api.dendranetwork.com/rest"/>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sec" id="btnPing">Test connection</button></div>
+      <div><label>Status</label><div class="addr small" id="netStatus">not connected</div></div>
+    </div>
+  </div>
+
+  <!-- CONNECT -->
+  <div class="card" id="connectCard">
+    <h2>Open a wallet</h2>
+    <div class="row">
+      <button id="btnCreate">Create new wallet</button>
+      <button class="sec" id="btnImportToggle">Import mnemonic</button>
+    </div>
+    <div id="importBox" class="hidden">
+      <label>24-word mnemonic</label>
+      <textarea id="mnemonicIn" placeholder="word1 word2 ... word24"></textarea>
+      <div style="margin-top:8px"><button id="btnImport">Import</button></div>
+    </div>
+    <div id="createBox" class="hidden">
+      <label>Your new mnemonic — write it down, it is the ONLY way to restore this wallet</label>
+      <div class="mnem" id="mnemonicOut"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="sec" id="btnCopyMnem">Copy</button>
+        <button id="btnConfirmCreate">I saved it — open wallet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT -->
+  <div class="card hidden" id="accountCard">
+    <h2>Account</h2>
+    <label>Address</label>
+    <div class="addr" id="address">—</div>
+    <div class="row" style="margin-top:8px">
+      <button class="sec" id="btnCopyAddr">Copy address</button>
+      <button class="ghost" id="btnRefresh">Refresh balance</button>
+      <button class="ghost" id="btnLock">Lock</button>
+    </div>
+    <div style="margin-top:18px">
+      <label>Balance</label>
+      <div class="bal"><span id="balDNDR">0</span> <small>DNDR</small></div>
+      <div class="muted small mono" id="balMicro">0 udndr</div>
+    </div>
+  </div>
+
+  <!-- SEND -->
+  <div class="card hidden" id="sendCard">
+    <h2>Send DNDR</h2>
+    <label>Recipient address (dendra1…)</label>
+    <input id="to" class="mono" placeholder="dendra1..."/>
+    <div class="row" style="margin-top:8px">
+      <div><label>Amount (DNDR)</label><input id="amount" inputmode="decimal" placeholder="0.0"/></div>
+      <div><label>Memo (optional)</label><input id="memo" placeholder=""/></div>
+    </div>
+    <div style="margin-top:12px"><button id="btnSend">Send</button></div>
+    <div class="muted small" id="sendInfo" style="margin-top:8px"></div>
+  </div>
+
+  <!-- DENDRA (read-only network view) -->
+  <div class="card hidden" id="dendraCard">
+    <h2>Network activity</h2>
+    <div class="k"><span class="muted">Total supply</span><span class="mono" id="supply">—</span></div>
+    <div class="k"><span class="muted">Registered miners</span><span class="mono" id="miners">—</span></div>
+    <div class="k"><span class="muted">Verification mode</span><span class="mono" id="vmode">—</span></div>
+    <div style="margin-top:10px"><button class="ghost" id="btnNet">Refresh network</button></div>
+  </div>
+
+  <footer>
+    Dendra Wallet · testnet · open-source. Your keys never leave this browser tab.
+  </footer>
+</div>
+
+<script type="module">
+// Load CosmJS from jsDelivr's prebuilt ESM (`/+esm`). Not esm.sh: its plain
+// build throws while loading libsodium ("Cannot read properties of undefined
+// (reading 'then')"), and its `?bundle` build ships a node-crypto shim whose
+// pbkdf2 is unimplemented, so deriving a key from a mnemonic fails. jsDelivr's
+// bundle resolves both. Verified end-to-end against the live node (key
+// derivation + balance query). We import dynamically so a CDN/offline failure
+// shows a clear banner instead of a silently broken page; top-level await
+// blocks the rest of the module (the handlers below) until the libs are ready.
+let DirectSecp256k1HdWallet, SigningStargateClient, StargateClient, GasPrice;
+try {
+  const [ps, sg] = await Promise.all([
+    import("https://cdn.jsdelivr.net/npm/@cosmjs/proto-signing@0.32.4/+esm"),
+    import("https://cdn.jsdelivr.net/npm/@cosmjs/stargate@0.32.4/+esm"),
+  ]);
+  DirectSecp256k1HdWallet = ps.DirectSecp256k1HdWallet;
+  ({ SigningStargateClient, StargateClient, GasPrice } = sg);
+} catch (e) {
+  const detail = (e && e.message) || e;
+  const banner = document.createElement("div");
+  banner.style.cssText = "background:#7f1d1d;color:#fff;padding:14px 16px;margin:0 0 16px;border-radius:10px;font-size:14px;line-height:1.45";
+  banner.textContent = "⚠ Failed to load the wallet crypto libraries from the CDN. The wallet needs internet access on first load. Details: " + detail;
+  (document.querySelector(".wrap") || document.body).prepend(banner);
+  const st = document.getElementById("netStatus"); if (st) st.textContent = "libraries not loaded";
+  throw e;
+}
+
+const CFG = { chainId:"dendra", prefix:"dendra", denom:"udndr", display:"DNDR", decimals:6, gasPrice:"0udndr" };
+const $ = id => document.getElementById(id);
+let wallet=null, address=null, signer=null;
+
+function toast(msg, kind=""){ const t=document.createElement("div"); t.className="toast "+kind; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3800); }
+const toDisplay = micro => (Number(micro||0)/10**CFG.decimals).toLocaleString(undefined,{maximumFractionDigits:6});
+const toMicro   = d => String(Math.round(Number(d)*10**CFG.decimals));
+
+$("btnImportToggle").onclick = ()=>{ $("importBox").classList.toggle("hidden"); $("createBox").classList.add("hidden"); };
+$("btnCreate").onclick = async ()=>{
+  const w = await DirectSecp256k1HdWallet.generate(24, { prefix:CFG.prefix });
+  $("mnemonicOut").textContent = w.mnemonic;
+  $("createBox").classList.remove("hidden"); $("importBox").classList.add("hidden");
+  window.__pendingMnemonic = w.mnemonic;
+};
+$("btnCopyMnem").onclick = ()=>{ navigator.clipboard.writeText($("mnemonicOut").textContent); toast("Mnemonic copied","ok"); };
+$("btnConfirmCreate").onclick = ()=> openWallet(window.__pendingMnemonic);
+$("btnImport").onclick = ()=>{ const m=$("mnemonicIn").value.trim(); if(m.split(/\s+/).length<12) return toast("Invalid mnemonic","err"); openWallet(m); };
+
+async function openWallet(mnemonic){
+  try{
+    signer = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, { prefix:CFG.prefix });
+    const [acct] = await signer.getAccounts();
+    address = acct.address;
+    $("address").textContent = address;
+    $("connectCard").classList.add("hidden");
+    ["accountCard","sendCard","dendraCard"].forEach(id=>$(id).classList.remove("hidden"));
+    window.__pendingMnemonic = null;
+    toast("Wallet opened","ok");
+    refreshBalance(); refreshNetwork();
+  }catch(e){ toast("Open failed: "+(e.message||e),"err"); }
+}
+$("btnLock").onclick = ()=>{ signer=null; address=null; ["accountCard","sendCard","dendraCard"].forEach(id=>$(id).classList.add("hidden")); $("connectCard").classList.remove("hidden"); toast("Locked"); };
+$("btnCopyAddr").onclick = ()=>{ navigator.clipboard.writeText(address); toast("Address copied","ok"); };
+
+async function refreshBalance(){
+  if(!address) return;
+  try{
+    const c = await StargateClient.connect($("rpc").value.trim());
+    const b = await c.getBalance(address, CFG.denom); c.disconnect?.();
+    $("balDNDR").textContent = toDisplay(b.amount); $("balMicro").textContent = (b.amount||"0")+" udndr";
+  }catch(e){ toast("Balance error (RPC/CORS?): "+(e.message||e),"err"); }
+}
+$("btnRefresh").onclick = refreshBalance;
+
+$("btnSend").onclick = async ()=>{
+  const to=$("to").value.trim(), amt=$("amount").value.trim(), memo=$("memo").value;
+  if(!to.startsWith("dendra1")) return toast("Recipient must start with dendra1","err");
+  if(!(Number(amt)>0)) return toast("Enter an amount","err");
+  $("btnSend").disabled=true; $("sendInfo").textContent="Signing and broadcasting…";
+  try{
+    const client = await SigningStargateClient.connectWithSigner($("rpc").value.trim(), signer, { gasPrice: GasPrice.fromString(CFG.gasPrice) });
+    const res = await client.sendTokens(address, to, [{denom:CFG.denom, amount:toMicro(amt)}], "auto", memo);
+    $("sendInfo").innerHTML = "Sent. tx: <span class='mono'>"+res.transactionHash+"</span>";
+    toast("Transaction sent","ok"); refreshBalance();
+  }catch(e){ $("sendInfo").textContent=""; toast("Send failed: "+(e.message||e),"err"); }
+  $("btnSend").disabled=false;
+};
+
+async function refreshNetwork(){
+  const rest = $("rest").value.trim().replace(/\/$/,"");
+  try{
+    const s = await fetch(rest+"/cosmos/bank/v1beta1/supply/by_denom?denom="+CFG.denom).then(r=>r.json());
+    if(s?.amount?.amount) $("supply").textContent = toDisplay(s.amount.amount)+" DNDR";
+  }catch{}
+  try{
+    const m = await fetch(rest+"/dendra/jobs/v1/miner").then(r=>r.json());
+    if(m?.miner) $("miners").textContent = m.miner.length;
+  }catch{ $("miners").textContent="—"; }
+  try{
+    const p = await fetch(rest+"/dendra/jobs/v1/params").then(r=>r.json());
+    if(p?.params) $("vmode").textContent = "mode "+(p.params.verification_mode||"?")+" · quorum "+(p.params.audit_min_quorum||"?");
+  }catch{ $("vmode").textContent="—"; }
+}
+$("btnNet").onclick = refreshNetwork;
+
+$("btnPing").onclick = async ()=>{
+  $("netStatus").textContent="connecting…";
+  try{ const c=await StargateClient.connect($("rpc").value.trim()); const h=await c.getHeight(); c.disconnect?.();
+    $("netStatus").textContent="OK · height "+h; }
+  catch(e){ $("netStatus").textContent="unreachable — check RPC URL + node CORS"; }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/jobs/types";
+
+// Params — paramètres économiques v4 (ADR-017/018). bps = 1/10000.
+message Params {
+  option (amino.name) = "dendra/x/jobs/Params";
+  option (gogoproto.equal) = true;
+
+  uint64 min_stake = 1;
+  uint64 protocol_fee_bps = 2; // 1500 = 15% (part protocole "cut")
+  uint64 validator_reward_bps = 3; // 5000 = 50% du cut
+  uint64 team_fee_bps = 4; // 2000 = 20% du cut
+  uint64 miner_vest_bps = 5; // 3000 = 30% de la part mineur
+  uint64 miner_vest_blocks = 6; // 200
+  uint64 slash_leak_bps = 7; // 8000 = 80%
+  uint64 burn_bps = 8; // 3000
+  uint64 reporter_bps = 9; // 3000
+  uint64 epoch_blocks = 10; // 100
+  uint64 work_gate_bps = 11; // 15000 = 1.5x (demande non-récupérable)
+  uint64 demand_client_cap = 12; // 100
+  uint64 fee_burn_bps = 13; // 0 (BME via buyback)
+  bool enforce_model_registry = 14; // OFF par défaut ; ON -> CreateCommit exige un modèle enregistré+actif (incrément C)
+  uint64 committee_reveal_delay = 15; // 0 (défaut) = graine figée à l'open (devnet) ; >0 = RÉVÉLATION DIFFÉRÉE de N blocs (anti-grinding H6 réel : graine = AppHash d'un bloc futur, imprévisible à l'open)
+  uint64 avail_epoch_blocks = 16; // 0 (défaut) = disponibilité OFF ; >0 = période (en blocs) du défi + versement de l'AvailPool (Phase 1b)
+  uint64 avail_payout_bps = 17; // fraction de l'AvailPool versée par époque de disponibilité (1/10000 ; 0 = ne verse rien)
+  bool avail_require_demand = 18; // OFF par défaut ; ON -> seuls les mineurs ayant servi de la DEMANDE réelle (demand>0) touchent l'AvailPool (anti-farming NEW-AV-05 : la liveness seule, farmable sans GPU, ne rapporte rien)
+  string vrf_beacon_pubkey = 19; // CR-10 : clé pub VRF (hex 32o) de l'autorité beacon ; vide = OFF (révélation AppHash)
+  uint64 committee_seed_source = 20; // E4 brique 4b : 0 (défaut) = legacy (height:time / AppHash) ; 1 = VRF DÉCENTRALISÉE (graine agrégée des vote-extensions des validateurs)
+  // INT-1 v0 — fraud-proof / dispute (re-adjudication bondée ; cf. docs/DISPUTE-FRAUDPROOF.md). OFF par défaut.
+  uint64 dispute_window = 21; // 0 (défaut) = disputes DÉSACTIVÉES ; >0 = activées (et fenêtre de N blocs en increment 2)
+  uint64 dispute_bond = 22;   // bond (udndr) à escrower pour contester un verdict (anti-grief)
+  // ADR-025 — VÉRIFICATION OPTIMISTE par échantillonnage VRF. DORMANT par défaut (mode 0 = redundant k=3 actuel).
+  uint64 verification_mode = 23; // 0 (défaut) = redundant (k=3, comportement actuel) ; 1 = optimistic (k=1 + audit échantillonné + slash dur)
+  uint64 audit_sample_bps = 24;  // probabilité d'audit en mode optimiste (1/10000 ; 1000 = 10%) ; 0 = aucun audit (dormant)
+  // ADR-025 M6 + liveness — raffinements OPTIONNELS, tous DORMANTS par défaut (0 = off).
+  uint64 audit_adaptive = 25;       // 0 = off ; >0 = fee de référence : effective_bps = audit_sample_bps·(1 + fee/ref), capé 10000 (gros job audité +)
+  uint64 audit_probation_jobs = 26; // 0 = off ; N = un mineur est audité à 100% sur ses N premiers jobs optimistes (anti-Sybil + cold-start)
+  uint64 audit_resolve_timeout = 27; // 0 = off ; >0 = un audit non résolu après N blocs est auto-vindiqué (+resolved) en EndBlock (liveness)
+  // ADR-028 v2 (conformité PLEINE) — 3 paramètres gouvernables, tous DORMANTS par défaut (0). À 0, le keeper
+  // reproduit STRICTEMENT le comportement v1 (cf. docs/PLAN-REGEN-PROTO-V2.md §1.2). Activation = gouvernance.
+  uint64 silence_slash_bps = 28; // 0 (défaut, dormant) = clawback léger seul (v1) ; >0 = pénalité de stake ADDITIONNELLE (stake·bps/10000, restituable, vers Trésorerie) sur le clawback no-quorum (primaire muet)
+  uint64 appeal_window = 29;      // 0 (défaut, dormant) = restitution via gouvernance (v1) ; >0 = blocs de révélation tardive (appel permissionless) — RÉSERVÉ : stocké, pas encore consommé (TODO machine d'état)
+  uint64 audit_min_quorum = 30;  // 0 (défaut, dormant) = plancher v1 ⌈CommitteeSize/2⌉+1 ; >0 = plancher de participation gouverné (nb ENTIER de juges frais distincts requis pour un slash dur)
+  // PLAN-V2-FEE-HOLD §A (fee-hold v2, 2026-06-21 ; décision internal audit C) — paiement optimiste VRAIMENT provisoire.
+  uint64 hold_bps = 31;          // 0 (défaut, dormant) = paiement optimiste intégral immédiat (v1) ; >0 = fraction du paiement RETENUE au module jusqu'à la fin de la fenêtre d'audit : libérée au primaire si vindiqué/non-audité ; sinon rembourse le client (clawback depuis la FEE retenue, JAMAIS le bond)
+  // Bootstrap VRF décentralisée (internal audit 2026-06-26) — PLANCHER de contributeurs sous lequel la graine
+  // décentralisée n'est PAS assez décentralisée pour tirer un comité en mode récompensé. 0 (défaut, dormant) =
+  // pas de minimum (seul l'absence totale de graine déclenche l'alerte). >0 = si committee_seed_source=1 et que
+  // la graine a < N contributeurs -> alerte VISIBLE + repli legacy (JAMAIS de halte). Testnet récompensé : poser
+  // à ⌈2/3 du set validateur prévu⌉ (seuil FIXE au 1er testnet ; le dynamique ⌈2N/3⌉ live = suivi, exige le
+  // câblage StakingKeeper). « À relever avec N. »
+  uint64 committee_min_vrf_contributors = 32;
+  // ADR-022 PLEIN — DISPONIBILITÉ SLASHABLE par défi VRF-échantillonné (« preuve de disponibilité »). Le keeper
+  // d'époque tire (graine VRF décentralisée) un sous-ensemble de mineurs bondés, leur envoie un défi INDISTINGUABLE
+  // d'un vrai job ; échec (pas de réponse à l'échéance OU réponse aberrante) -> SLASH BORNÉ, sous quorum anti-faux-
+  // positif. TOUS DORMANTS par défaut (0) : inertes tant que avail_epoch_blocks>0 ET ces params posés. Activation = gouvernance.
+  uint64 avail_threshold_bps = 33;   // 0 (défaut, dormant) = pas de vérif sémantique du défi ; >0 = seuil cosinus (1/10000) sous lequel la réponse au défi est jugée ABERRANTE (réutilise VerifySemantic)
+  uint64 avail_deadline_blocks = 34; // 0 (défaut, dormant) = pas d'échéance (aucun défi exigible) ; >0 = nb de blocs accordés au mineur défié pour répondre avant comptage d'un ÉCHEC
+  uint64 avail_slash_bps = 35;       // 0 (défaut, dormant) = aucun slash dispo ; >0 = fraction du stake slashée (1/10000) quand le quorum d'échecs est atteint
+  uint64 avail_slash_max = 36;       // 0 (défaut, dormant) = pas de borne haute ; >0 = plafond ABSOLU du slash dispo (udndr) par déclenchement : slash = min(stake·avail_slash_bps/10000, avail_slash_max)
+  uint64 avail_fail_window = 37;     // 0 (défaut, dormant) = fenêtre nulle (jamais de quorum) ; >0 = taille (en époques/blocs) de la fenêtre glissante où l'on compte les échecs d'un mineur
+  uint64 avail_fail_k = 38;          // 0 (défaut, dormant) = jamais de slash (anti-faux-positif total) ; >0 = nb d'ÉCHECS dans avail_fail_window requis pour déclencher le slash (un échec isolé = réseau/latence, pas de slash)
+}

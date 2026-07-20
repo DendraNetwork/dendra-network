@@ -1,0 +1,15 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+option go_package = "dendra/x/jobs/types";
+
+// Pools defines the Pools message.
+message Pools {
+  uint64 miner_paid = 1;
+  uint64 validators = 2;
+  uint64 team = 3;
+  uint64 treasury = 4;
+  string creator = 5;
+  uint64 miner_locked = 6;
+  uint64 training_paid = 7;
+}

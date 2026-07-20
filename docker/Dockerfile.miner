@@ -1,0 +1,24 @@
+# Image MINEUR AUTONOME (binaire dendrad + client mineur Python) pour REJOINDRE un testnet Dendra distant.
+# Multi-stage : compile dendrad depuis chain, puis runtime python slim. AUCUNE dependance a une image
+# pre-construite (contrairement a Dockerfile.services qui fait COPY --from=dendra/chain).
+# Build context = RACINE du depot.  /!\ Build NON testable dans le sandbox de dev (pas de Docker) -> a valider sur l'hote.
+
+# --- Stage 1 : binaire de la chaine (le mineur shell-out vers dendrad pour signer/interroger via DENDRA_NODE) ---
+FROM golang:1.25-bookworm AS chainbuild
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /chain
+COPY chain/ /chain/
+RUN ( go build -o /go/bin/dendrad ./cmd/dendrad ) \
+    || ( echo "build dendrad KO -> verifier ./cmd/dendrad dans chain (cf docker/README.md)"; exit 1 )
+
+# --- Stage 2 : runtime mineur (leger) ---
+FROM python:3.12-slim
+RUN pip install --no-cache-dir cryptography requests prometheus_client
+WORKDIR /app
+COPY services/ /app/
+COPY docker/entrypoint-services.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && mkdir -p /data/keys
+COPY --from=chainbuild /go/bin/dendrad /usr/local/bin/dendrad
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,54 @@
+{
+  "title": "Dendra — réseau",
+  "uid": "dendra-network",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Hauteur de bloc",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "dendra-prom" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "targets": [ { "refId": "A", "expr": "dendra_block_height", "datasource": { "type": "prometheus", "uid": "dendra-prom" } } ]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Mineurs enregistrés",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "dendra-prom" },
+      "targets": [ { "refId": "A", "expr": "dendra_miners_total", "datasource": { "type": "prometheus", "uid": "dendra-prom" } } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Tokens distribués (Σ soldes)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "dendra-prom" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "none" } },
+      "targets": [ { "refId": "A", "expr": "dendra_miners_total_balance_token", "datasource": { "type": "prometheus", "uid": "dendra-prom" } } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Trésorerie (slashes)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "dendra-prom" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } } },
+      "targets": [ { "refId": "A", "expr": "dendra_pool_treasury", "datasource": { "type": "prometheus", "uid": "dendra-prom" } } ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Solde des mineurs (token) — gains au fil du temps",
+      "gridPos": { "x": 0, "y": 4, "w": 14, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "dendra-prom" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } } },
+      "targets": [ { "refId": "A", "expr": "dendra_miner_balance_token", "legendFormat": "{{miner}}", "datasource": { "type": "prometheus", "uid": "dendra-prom" } } ]
+    },
+    {
+      "id": 6, "type": "bargauge", "title": "Stake (bond) des mineurs",
+      "gridPos": { "x": 14, "y": 4, "w": 10, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "dendra-prom" },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "fieldConfig": { "defaults": { "color": { "mode": "continuous-GrYlRd" }, "min": 0, "max": 2000 } },
+      "targets": [ { "refId": "A", "expr": "dendra_miner_stake", "legendFormat": "{{miner}}", "instant": true, "datasource": { "type": "prometheus", "uid": "dendra-prom" } } ]
+    }
+  ]
+}

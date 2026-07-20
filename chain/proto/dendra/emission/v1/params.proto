@@ -1,0 +1,19 @@
+syntax = "proto3";
+package dendra.emission.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "dendra/x/emission/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "dendra/x/emission/Params";
+  option (gogoproto.equal) = true;
+
+  uint64 reserve_release_bps = 1; // 2200 = 22%/an du restant (courbe décroissante)
+  uint64 work_split_bps = 2;      // 5000 = 50% du release
+  uint64 avail_split_bps = 3;     // 2000 = 20% ; la sécurité = le reste (≈30%)
+  uint64 work_gate_bps = 4;       // 15000 = 1.5x la demande non-récupérable
+  uint64 epoch_blocks = 5;        // blocs entre 2 libérations (0 -> défaut)
+}

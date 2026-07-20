@@ -1,0 +1,187 @@
+# Dendra ($DNDR) — persistent TESTNET. One command: docker compose up -d
+#  - chain: native `dendrad start`, frozen genesis + stable keys in the persistent `dendra-home` volume.
+#  - faucet/gateway: share `dendra-home` and sign by key name (bob / gw), no hardcoded keys.
+#  - miners are EXTERNAL (PC + GPU). Local miners and monitoring are optional profiles.
+name: dendra
+
+x-svc-env: &svc-env
+  DENDRA_RELAY: "http://relay:8645"
+  DENDRA_NODE: "tcp://chain:26657"
+  DENDRA_CHAIN_ID: "dendra"
+  OLLAMA_ENDPOINT: "http://ollama:11434"
+
+services:
+  chain:
+    build: { context: ., dockerfile: docker/Dockerfile.chain }
+    image: dendra/chain:latest
+    restart: always
+    environment: { DENDRA_CHAIN_ID: "dendra", DENDRA_VRF_KEY_FILE: "/root/.dendra/config/vrf_key", DENDRA_AVAIL_SLASH: "${DENDRA_AVAIL_SLASH:-0}", DENDRA_AUDIT_SAMPLE_BPS: "${DENDRA_AUDIT_SAMPLE_BPS:-5000}", DENDRA_AUDIT_RESOLVE_TIMEOUT: "${DENDRA_AUDIT_RESOLVE_TIMEOUT:-120}" }   # VRF key file. DENDRA_AVAIL_SLASH=1 arms availability slashing (keep 0/dormant until proven live). DENDRA_AUDIT_SAMPLE_BPS: audited share (5000 = 50% testnet; 10000 = 100% demo). DENDRA_AUDIT_RESOLVE_TIMEOUT: blocks before an audit resolves (raise it for slower multi-model judges).
+    volumes: ["dendra-home:/root/.dendra"]
+    ports: ["26657:26657", "26656:26656", "1317:1317", "9090:9090"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:26657/status >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+  faucet:
+    image: dendra/services:latest
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["faucet"]
+    volumes: ["dendra-home:/root/.dendra"]
+    ports: ["4500:4500"]
+    # Tunable anti-abuse (defaults = production: 5 drips/IP/day, 24h cooldown). For a closed test (many judges +
+    # a cheater from one IP) relax it: DENDRA_FAUCET_IP_DAILY=100 DENDRA_FAUCET_ADDR_COOLDOWN=0 docker compose up -d faucet.
+    # PoW anti-Sybil is wired but DORMANT by default (0). For a public launch, set DENDRA_FAUCET_POW_BITS=20 in the .env.
+    # DENDRA_PUBLIC is passed to the service so the daemon's fail-closed guard (PUBLIC=1 without PoW = refuse to boot)
+    # actually takes effect under Docker.
+    environment: { <<: *svc-env, DENDRA_HOME: "/root/.dendra", DENDRA_FAUCET_FROM: "bob", DENDRA_FAUCET_AMOUNT: "10000000", DENDRA_FAUCET_PORT: "4500", DENDRA_FAUCET_IP_DAILY: "${DENDRA_FAUCET_IP_DAILY:-5}", DENDRA_FAUCET_ADDR_COOLDOWN: "${DENDRA_FAUCET_ADDR_COOLDOWN:-86400}", DENDRA_FAUCET_DAILY_CAP: "${DENDRA_FAUCET_DAILY_CAP:-2000}", DENDRA_FAUCET_POW_BITS: "${DENDRA_FAUCET_POW_BITS:-0}", DENDRA_PUBLIC: "${DENDRA_PUBLIC:-0}" }
+
+  relay:
+    build: { context: ., dockerfile: docker/Dockerfile.services }
+    image: dendra/services:latest
+    depends_on: [chain]
+    restart: always
+    command: ["relay"]
+    ports: ["8645:8645"]
+    # With DENDRA_PUBLIC=1 (the public-launch .env) the relay REFUSES to boot without a strong DENDRA_RELAY_TOKEN
+    # (fail-closed, mirroring the gateway). A closed stack (PUBLIC=0) is unchanged.
+    environment: { DENDRA_RELAY_HOST: "0.0.0.0", DENDRA_PUBLIC: "${DENDRA_PUBLIC:-0}", DENDRA_RELAY_TOKEN: "${DENDRA_RELAY_TOKEN:-}" }
+
+  gateway:
+    image: dendra/services:latest
+    depends_on:
+      chain: { condition: service_healthy }
+      relay: { condition: service_started }
+      faucet: { condition: service_started }
+    restart: always
+    command: ["gateway"]
+    volumes: ["dendra-home:/root/.dendra"]
+    ports: ["8651:8651"]
+    # Moderation: a deterministic CPU regex floor (always on, in-process, incl. the CSAM pattern) is the ONLY
+    # content filter. The LLM classifier (llama-guard) is permanently disabled. Not a legal-compliance guarantee.
+    # DENDRA_RELAY_TOKEN: the gateway is a relay CLIENT (it POSTs sealed tasks). When the relay runs with
+    # auth ON (public launch), the gateway MUST send the token or the relay rejects its posts silently and
+    # no task ever reaches the miners. (Closed stack: relay auth OFF, so its absence was harmless.)
+    environment: { <<: *svc-env, DENDRA_HOME: "/root/.dendra", DENDRA_GW_PORT: "8651", DENDRA_GW_HOST: "0.0.0.0", DENDRA_COMMITTEE_K: "1", DENDRA_SUBSIDY_CLIENT: "gw", DENDRA_FREE_TIER: "1", DENDRA_FAUCET: "http://faucet:4500", DENDRA_API_KEY: "${DENDRA_API_KEY:-}", DENDRA_RELAY_TOKEN: "${DENDRA_RELAY_TOKEN:-}", DENDRA_PUBLIC: "${DENDRA_PUBLIC:-0}", DENDRA_CORS_ORIGIN: "${DENDRA_CORS_ORIGIN:-}" }
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    depends_on: [gateway]
+    restart: always
+    environment:
+      OPENAI_API_BASE_URLS: "http://gateway:8651/v1"
+      OPENAI_API_KEYS: "${DENDRA_API_KEY:-dendra}"   # public exposure: set a real key via .env
+      ENABLE_OLLAMA_API: "False"
+      WEBUI_AUTH: "${WEBUI_AUTH:-False}"             # public exposure: WEBUI_AUTH=True (accounts) via .env
+      ENABLE_PERSISTENT_CONFIG: "False"
+      ENABLE_TITLE_GENERATION: "False"
+      WEBUI_NAME: "Dendra"
+      WEBUI_URL: "${WEBUI_URL:-http://localhost:8080}"   # public: https://chat.dendranetwork.com (set via .env)
+    volumes: ["open-webui:/app/backend/data"]
+    ports: ["8080:8080"]
+
+  # HTTPS reverse proxy (auto Let's Encrypt): api.dendranetwork.com -> gateway, chat.dendranetwork.com -> open-webui.
+  # Requires DNS-only A records (api. + chat.) -> VPS IP and ports 80/443 open. Config: docker/Caddyfile.
+  caddy:
+    image: caddy:2
+    restart: always
+    depends_on: [gateway, open-webui]
+    # Key injected server-side on the public /demo path (browser never sees it) — see docker/Caddyfile.
+    environment: { DENDRA_API_KEY: "${DENDRA_API_KEY:-}" }
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # ----- PUBLIC launch (profile: docker compose --profile public up -d) -----
+  # The Proof (:8090) = read-only verifiability feed (recent jobs / pools / VRF health — NO secrets);
+  # points (:8091) = provisional Season 0 leaderboard (stateless, recomputed from on-chain state).
+  proof:
+    image: dendra/services:latest
+    profiles: ["public"]
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["proof"]
+    environment: { <<: *svc-env, DENDRA_PROOF_HOST: "0.0.0.0", DENDRA_PROOF_PORT: "8090", DENDRA_PROOF_CORS: "${DENDRA_PROOF_CORS:-https://dendranetwork.com}" }
+    ports: ["8090:8090"]
+  points:
+    image: dendra/services:latest
+    profiles: ["public"]
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["points"]
+    environment: { <<: *svc-env, DENDRA_POINTS_HOST: "0.0.0.0", DENDRA_POINTS_PORT: "8091", DENDRA_POINTS_CORS: "${DENDRA_POINTS_CORS:-https://dendranetwork.com}", DENDRA_R2_EXCLUDE_ADDRS: "${DENDRA_R2_EXCLUDE_ADDRS:-}" }
+    ports: ["8091:8091"]
+  # Network capacity registry: hardware + served models, DECLARED by operators (inventory, NOT proof —
+  # a node can claim any GPU). Persisted on a volume: a registry that forgets on restart is a bug.
+  capacity:
+    image: dendra/services:latest
+    profiles: ["public"]
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["capacity"]
+    environment: { <<: *svc-env, DENDRA_CAPACITY_HOST: "0.0.0.0", DENDRA_CAPACITY_PORT: "8092", DENDRA_CAPACITY_CORS: "${DENDRA_CAPACITY_CORS:-*}", DENDRA_CAPACITY_DB: "/data/capacity.json" }
+    volumes: ["capacity-db:/data"]
+    ports: ["8092:8092"]
+
+  # ----- monitoring (optional: docker compose --profile monitoring up -d) -----
+  exporter:
+    image: dendra/services:latest
+    profiles: ["monitoring"]
+    depends_on: { chain: { condition: service_healthy } }
+    command: ["exporter"]
+    environment: { <<: *svc-env, DENDRA_EXPORTER_PORT: "9101" }
+    ports: ["9101:9101"]
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["monitoring"]
+    depends_on: [exporter]
+    volumes: ["./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:9099:9090"]   # localhost only — internal metrics, reach via SSH tunnel (not public)
+  grafana:
+    image: grafana/grafana-oss:latest
+    profiles: ["monitoring"]
+    depends_on: [prometheus]
+    environment:
+      # Anonymous access is READ-ONLY (Viewer, not Admin). Monitoring is an opt-in profile and Grafana binds
+      # to localhost only — do NOT expose :3000 publicly; reach it over an SSH tunnel
+      # (ssh -L 3000:localhost:3000 user@host).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - "./docker/grafana-provisioning:/etc/grafana/provisioning:ro"
+      - "grafana-data:/var/lib/grafana"
+    ports: ["127.0.0.1:3000:3000"]
+
+  # ----- LOCAL miners (optional: docker compose --profile local up -d). On the VPS, miners are EXTERNAL. -----
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    volumes: ["ollama-models:/root/.ollama"]
+    ports: ["11434:11434"]
+  miner1:
+    image: dendra/services:latest
+    profiles: ["local"]
+    depends_on: { chain: { condition: service_healthy }, relay: { condition: service_started }, ollama: { condition: service_started } }
+    command: ["miner", "m1"]
+    # DENDRA_MINER_JUDGE=1 -> this miner ALSO judges audits (optimistic committee); DENDRA_JUDGE_ENDPOINT = the judge's
+    # Ollama (point it at a CPU for the MoE, freeing the GPU). DORMANT by default (0); arm it for audit/incentive.
+    # Benefit-of-the-doubt is ON by default (proven ambiguity -> vote "1", avoiding an unfair no-quorum penalty on an
+    # honest miner). Rollback: DENDRA_JUDGE_ABSTAIN_VOTE=0 in the .env.
+    # DENDRA_JUDGE_MODEL_OVERRIDE/_ID: a judge MUST carry its judge model on-chain (committee-model diversity =
+    # the C3 gate). Absent -> fallback to the default model, diluting the on-chain proxy.
+    environment: { <<: *svc-env, FAUCET: "http://faucet:4500", BACKEND: "ollama", DENDRA_MINER_JUDGE: "${DENDRA_MINER_JUDGE:-0}", DENDRA_JUDGE_ENDPOINT: "${DENDRA_JUDGE_ENDPOINT:-}", DENDRA_JUDGE_ABSTAIN_VOTE: "${DENDRA_JUDGE_ABSTAIN_VOTE:-1}", DENDRA_JUDGE_MODEL_OVERRIDE: "${DENDRA_JUDGE_MODEL_OVERRIDE:-}", DENDRA_JUDGE_MODEL_ID: "${DENDRA_JUDGE_MODEL_ID:-}" }
+
+volumes:
+  dendra-home: {}
+  ollama-models: {}
+  grafana-data: {}
+  open-webui: {}
+  caddy-data: {}
+  caddy-config: {}
+  capacity-db: {}

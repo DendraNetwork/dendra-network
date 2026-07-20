@@ -1,0 +1,206 @@
+syntax = "proto3";
+
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "dendra/jobs/v1/beacon.proto";
+import "dendra/jobs/v1/commit.proto";
+import "dendra/jobs/v1/job.proto";
+import "dendra/jobs/v1/miner.proto";
+import "dendra/jobs/v1/params.proto";
+import "dendra/jobs/v1/pools.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "dendra/x/jobs/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/params";
+  }
+
+  // ListMiner Queries a list of Miner items.
+  rpc GetMiner(QueryGetMinerRequest) returns (QueryGetMinerResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/miner/{miner_id}";
+  }
+
+  // ListMiner defines the ListMiner RPC.
+  rpc ListMiner(QueryAllMinerRequest) returns (QueryAllMinerResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/miner";
+  }
+
+  // ListJob Queries a list of Job items.
+  rpc GetJob(QueryGetJobRequest) returns (QueryGetJobResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/job/{job_id}";
+  }
+
+  // ListJob defines the ListJob RPC.
+  rpc ListJob(QueryAllJobRequest) returns (QueryAllJobResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/job";
+  }
+
+  // Queries a Pools by index.
+  rpc GetPools(QueryGetPoolsRequest) returns (QueryGetPoolsResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/pools";
+  }
+
+  // ListCommit Queries a list of Commit items.
+  rpc GetCommit(QueryGetCommitRequest) returns (QueryGetCommitResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/commit/{job_id}";
+  }
+
+  // ListCommit defines the ListCommit RPC.
+  rpc ListCommit(QueryAllCommitRequest) returns (QueryAllCommitResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/commit";
+  }
+
+  // ListBeacon Queries a list of Beacon items.
+  rpc GetBeacon(QueryGetBeaconRequest) returns (QueryGetBeaconResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/beacon/{job_id}";
+  }
+
+  // ListBeacon defines the ListBeacon RPC.
+  rpc ListBeacon(QueryAllBeaconRequest) returns (QueryAllBeaconResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/beacon";
+  }
+
+  // GetAvailChallenge -- Phase 1b : défi de disponibilité courant + époque (à renvoyer via prove-availability).
+  rpc GetAvailChallenge(QueryGetAvailChallengeRequest) returns (QueryGetAvailChallengeResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/avail_challenge";
+  }
+
+  // CommitteeSeedHealth (bootstrap VRF, internal audit 2026-06-26) — santé de l'aléa de comité décentralisé : source,
+  // plancher, dernière graine décentralisée + ses contributeurs. L'exporter en dérive la métrique
+  // dendra_committee_grinding_inactive (panneau Grafana ROUGE = anti-grinding inactif = précondition d'ouverture).
+  rpc CommitteeSeedHealth(QueryCommitteeSeedHealthRequest) returns (QueryCommitteeSeedHealthResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/committee_seed_health";
+  }
+}
+
+// CommitteeSeedHealth — request/response (bootstrap VRF).
+message QueryCommitteeSeedHealthRequest {}
+message QueryCommitteeSeedHealthResponse {
+  uint64 committee_seed_source = 1;          // 0 = legacy ; 1 = VRF décentralisée
+  uint64 committee_min_vrf_contributors = 2; // plancher de contributeurs
+  int64  latest_seed_height = 3;             // hauteur de la graine décentralisée la plus récente (0 si aucune)
+  uint64 latest_contributors = 4;            // nb de contributeurs à cette hauteur
+  bool   has_recent_seed = 5;                // une graine décentralisée existe à H ou H-1
+  int64  current_height = 6;
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryGetMinerRequest defines the QueryGetMinerRequest message.
+message QueryGetMinerRequest {
+  string miner_id = 1;
+}
+
+// QueryGetMinerResponse defines the QueryGetMinerResponse message.
+message QueryGetMinerResponse {
+  Miner miner = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllMinerRequest defines the QueryAllMinerRequest message.
+message QueryAllMinerRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllMinerResponse defines the QueryAllMinerResponse message.
+message QueryAllMinerResponse {
+  repeated Miner miner = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetJobRequest defines the QueryGetJobRequest message.
+message QueryGetJobRequest {
+  string job_id = 1;
+}
+
+// QueryGetJobResponse defines the QueryGetJobResponse message.
+message QueryGetJobResponse {
+  Job job = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllJobRequest defines the QueryAllJobRequest message.
+message QueryAllJobRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllJobResponse defines the QueryAllJobResponse message.
+message QueryAllJobResponse {
+  repeated Job job = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetPoolsRequest defines the QueryGetPoolsRequest message.
+message QueryGetPoolsRequest {}
+
+// QueryGetPoolsResponse defines the QueryGetPoolsResponse message.
+message QueryGetPoolsResponse {
+  Pools pools = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryGetCommitRequest defines the QueryGetCommitRequest message.
+message QueryGetCommitRequest {
+  string job_id = 1;
+}
+
+// QueryGetCommitResponse defines the QueryGetCommitResponse message.
+message QueryGetCommitResponse {
+  Commit commit = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllCommitRequest defines the QueryAllCommitRequest message.
+message QueryAllCommitRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllCommitResponse defines the QueryAllCommitResponse message.
+message QueryAllCommitResponse {
+  repeated Commit commit = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetBeaconRequest defines the QueryGetBeaconRequest message.
+message QueryGetBeaconRequest {
+  string job_id = 1;
+}
+
+// QueryGetBeaconResponse defines the QueryGetBeaconResponse message.
+message QueryGetBeaconResponse {
+  Beacon beacon = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllBeaconRequest defines the QueryAllBeaconRequest message.
+message QueryAllBeaconRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllBeaconResponse defines the QueryAllBeaconResponse message.
+message QueryAllBeaconResponse {
+  repeated Beacon beacon = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetAvailChallengeRequest -- requête du défi de disponibilité courant (Phase 1b).
+message QueryGetAvailChallengeRequest {}
+
+// QueryGetAvailChallengeResponse -- défi courant + époque + période (avail_epoch_blocks=0 -> dispo désactivée).
+message QueryGetAvailChallengeResponse {
+  string challenge = 1;
+  int64 epoch = 2;
+  uint64 avail_epoch_blocks = 3;
+}

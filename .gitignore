@@ -1,0 +1,58 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.uv/
+*.egg-info/
+
+# --- Go / build ---
+/build/
+*.test
+*.out
+# ⚠️ NE JAMAIS ecrire `dendrad` NU ici. En syntaxe gitignore, un motif sans `/` matche aussi bien un
+# FICHIER qu'un REPERTOIRE, a n'importe quelle profondeur : `dendrad` excluait donc `chain/cmd/dendrad/`
+# — le point d'entree du noeud — alors que tous les Dockerfiles compilent `./cmd/dendrad`. Le depot
+# publie contenait les fichiers sur disque mais git n'en suivait aucun : `clone` puis `build` echouait,
+# et rien dans le build ne le signalait. Motifs ANCRES uniquement, qui ne designent que le BINAIRE.
+/dendrad
+/chain/dendrad
+/chain/build/
+# ANCRE, comme les trois lignes au-dessus — et pour exactement la meme raison, qu'on avait pourtant
+# ecrite juste au-dessus avant de la contredire a la ligne suivante. `vendor/` non ancre matche a
+# TOUTE profondeur : il avalait `wallet/web/vendor/`, le bundle CosmJS servi par le wallet. Le
+# fichier etait bien copie dans le depot public, et git n'en suivait aucun — le jour ou le wallet
+# pointera vers ce bundle au lieu du CDN, la page publiee serait morte au chargement. On ne vise
+# donc que le repertoire `vendor/` de Go, a la racine du module.
+/chain/vendor/
+
+# --- Runtime / chain state (NEVER commit) ---
+*.log
+.dendra/
+*.dendra/
+data/
+node_data/
+keyring-*/
+*.mnemonic
+*.key
+*.pem
+.env
+!.env.example
+
+# --- Local results / scratch ---
+bench-results/
+/tmp/
+*.tmp
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Marqueur d'integrite du BUILD, destine a l'operateur qui publie : il porte le SHA du depot
+# source. Il doit rester dans l'arbre local (la procedure de publication le verifie) mais ne
+# JAMAIS etre commite : un artefact de release ne documente pas la chaine de fabrication.
+.build-complete
