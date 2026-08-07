@@ -1,0 +1,17 @@
+3
+# CONSENSUS EPOCH — bump this number (line 1) on every consensus-breaking change.
+# Read by deploy/launch/launch_public.sh (guard 3c): deploying an epoch different from the one the
+# RUNNING chain was started with, without DENDRA_FRESH=1, is a replay -> AppHash panic and a fork.
+# A bump therefore means: a FRESH GENESIS is mandatory, the running state cannot be carried over.
+#
+# Epoch contents:
+#   1 = anchored committee + 2/3 quorum + commitRange (genesis 965d5d7c...).
+#   3 = miner_id DERIVED from the signer address and enforced in CreateMiner (ADR-039), and
+#       committee_reveal_delay actually transmitted to the chain container. Both are genesis-level:
+#       an existing chain cannot adopt either without a fresh genesis.
+#   2 = C1..M8, double slash k=3, ADR-034 partition (audits_opened counter, +adjudicated marker,
+#       audit_distinct_voters, vitality windows moved into params, assigned-committee and
+#       audit-deferred queries, extended genesis); vindication at the RELATIVE bar and sub-quorum
+#       => DEFERRAL (end of clawback-on-silence), the AdjudicateDispute twin closed,
+#       audit_voters/audit_max_operator_votes, HeldSince and the held-summary query,
+#       genesis held_since_elapsed.

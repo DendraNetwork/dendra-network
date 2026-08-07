@@ -1,0 +1,548 @@
+syntax = "proto3";
+
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "dendra/jobs/v1/params.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/jobs/types";
+
+// Msg defines the Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // UpdateParams defines a (governance) operation for updating the module
+  // parameters. The authority defaults to the x/gov module account.
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+
+  // CreateMiner defines the CreateMiner RPC.
+  rpc CreateMiner(MsgCreateMiner) returns (MsgCreateMinerResponse);
+
+  // UpdateMiner defines the UpdateMiner RPC.
+  rpc UpdateMiner(MsgUpdateMiner) returns (MsgUpdateMinerResponse);
+
+  // DeleteMiner defines the DeleteMiner RPC.
+  rpc DeleteMiner(MsgDeleteMiner) returns (MsgDeleteMinerResponse);
+
+  // CreateJob defines the CreateJob RPC.
+  rpc CreateJob(MsgCreateJob) returns (MsgCreateJobResponse);
+
+  // UpdateJob defines the UpdateJob RPC.
+  rpc UpdateJob(MsgUpdateJob) returns (MsgUpdateJobResponse);
+
+  // DeleteJob defines the DeleteJob RPC.
+  rpc DeleteJob(MsgDeleteJob) returns (MsgDeleteJobResponse);
+
+  // CreatePools defines the CreatePools RPC.
+  rpc CreatePools(MsgCreatePools) returns (MsgCreatePoolsResponse);
+
+  // UpdatePools defines the UpdatePools RPC.
+  rpc UpdatePools(MsgUpdatePools) returns (MsgUpdatePoolsResponse);
+
+  // DeletePools defines the DeletePools RPC.
+  rpc DeletePools(MsgDeletePools) returns (MsgDeletePoolsResponse);
+
+  // SettleJob defines the SettleJob RPC.
+  rpc SettleJob(MsgSettleJob) returns (MsgSettleJobResponse);
+
+  // SlashMiner defines the SlashMiner RPC.
+  rpc SlashMiner(MsgSlashMiner) returns (MsgSlashMinerResponse);
+
+  // ClaimSubsidy defines the ClaimSubsidy RPC.
+  rpc ClaimSubsidy(MsgClaimSubsidy) returns (MsgClaimSubsidyResponse);
+
+  // ReportDivergence defines the ReportDivergence RPC.
+  rpc ReportDivergence(MsgReportDivergence) returns (MsgReportDivergenceResponse);
+
+  // RewardTraining defines the RewardTraining RPC.
+  rpc RewardTraining(MsgRewardTraining) returns (MsgRewardTrainingResponse);
+
+  // PayReal defines the PayReal RPC.
+  rpc PayReal(MsgPayReal) returns (MsgPayRealResponse);
+
+  // CreateCommit defines the CreateCommit RPC.
+  rpc CreateCommit(MsgCreateCommit) returns (MsgCreateCommitResponse);
+
+  // UpdateCommit defines the UpdateCommit RPC.
+  rpc UpdateCommit(MsgUpdateCommit) returns (MsgUpdateCommitResponse);
+
+  // DeleteCommit defines the DeleteCommit RPC.
+  rpc DeleteCommit(MsgDeleteCommit) returns (MsgDeleteCommitResponse);
+
+  // FinalizeJob defines the FinalizeJob RPC.
+  rpc FinalizeJob(MsgFinalizeJob) returns (MsgFinalizeJobResponse);
+
+  // SettlePay defines the SettlePay RPC.
+  rpc SettlePay(MsgSettlePay) returns (MsgSettlePayResponse);
+
+  // OpenJob defines the OpenJob RPC.
+  rpc OpenJob(MsgOpenJob) returns (MsgOpenJobResponse);
+
+  // Payout defines the Payout RPC.
+  rpc Payout(MsgPayout) returns (MsgPayoutResponse);
+
+  // VerifySemantic defines the VerifySemantic RPC.
+  rpc VerifySemantic(MsgVerifySemantic) returns (MsgVerifySemanticResponse);
+
+  // CreateBeacon defines the CreateBeacon RPC.
+  rpc CreateBeacon(MsgCreateBeacon) returns (MsgCreateBeaconResponse);
+
+  // UpdateBeacon defines the UpdateBeacon RPC.
+  rpc UpdateBeacon(MsgUpdateBeacon) returns (MsgUpdateBeaconResponse);
+
+  // DeleteBeacon defines the DeleteBeacon RPC.
+  rpc DeleteBeacon(MsgDeleteBeacon) returns (MsgDeleteBeaconResponse);
+
+  // SettleSemantic defines the SettleSemantic RPC.
+  rpc SettleSemantic(MsgSettleSemantic) returns (MsgSettleSemanticResponse);
+
+  // ProveAvailability answers the current availability challenge on behalf of a miner.
+  rpc ProveAvailability(MsgProveAvailability) returns (MsgProveAvailabilityResponse);
+  // SubmitVrfBeacon sets a job's committee seed from a verifiable VRF proof.
+  rpc SubmitVrfBeacon(MsgSubmitVrfBeacon) returns (MsgSubmitVrfBeaconResponse);
+  // RotateMinerKeys replaces a miner's anchored encryption and VRF keys without a delete followed by
+  // a create, so demand history and stake survive the rotation.
+  rpc RotateMinerKeys(MsgRotateMinerKeys) returns (MsgRotateMinerKeysResponse);
+  // RegisterValidatorVrfKey anchors a validator's VRF public key used to verify its vote extensions.
+  rpc RegisterValidatorVrfKey(MsgRegisterValidatorVrfKey) returns (MsgRegisterValidatorVrfKeyResponse);
+  // DisputeVerdict contests the verdict of a SETTLED job. Permissionless, backed by a bond, and it
+  // opens a re-adjudication.
+  rpc DisputeVerdict(MsgDisputeVerdict) returns (MsgDisputeVerdictResponse);
+  // ResolveDispute closes a dispute under an authority gate: it refunds and rewards the disputer, or
+  // slashes the bond. Superseded by AdjudicateDispute wherever the trustless path is available.
+  rpc ResolveDispute(MsgResolveDispute) returns (MsgResolveDisputeResponse);
+  // AdjudicateDispute closes a dispute WITHOUT governance: the chain reads the re-commits of a FRESH
+  // committee and decides by stake majority. No trusted party is involved in the outcome.
+  rpc AdjudicateDispute(MsgAdjudicateDispute) returns (MsgAdjudicateDisputeResponse);
+}
+
+// MsgUpdateParams is the Msg/UpdateParams request type.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "dendra/x/jobs/MsgUpdateParams";
+
+  // authority is the address that controls the module (defaults to x/gov unless overwritten).
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // params defines the module parameters to update.
+
+  // NOTE: All parameters must be supplied.
+  Params params = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// MsgUpdateParamsResponse defines the response structure for executing a
+// MsgUpdateParams message.
+message MsgUpdateParamsResponse {}
+
+// MsgDisputeVerdict contests the verdict of a SETTLED job. Anyone may send it; the bond configured
+// in params.dispute_bond is escrowed from the sender and is what makes the challenge non-free.
+message MsgDisputeVerdict {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgDisputeVerdictResponse is the response of MsgDisputeVerdict.
+message MsgDisputeVerdictResponse {}
+
+// MsgResolveDispute resolves an open dispute behind an AUTHORITY gate (governance). It is the
+// fallback path; the trustless path is MsgAdjudicateDispute, which needs no privileged signer.
+// upheld = true means the dispute is valid and the original verdict is overturned.
+message MsgResolveDispute {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  bool upheld = 3;
+}
+
+// MsgResolveDisputeResponse is the response of MsgResolveDispute.
+message MsgResolveDisputeResponse {}
+
+// MsgAdjudicateDispute closes a dispute PERMISSIONLESSLY. The chain reads the re-commits of a FRESH
+// committee — stored under the key "<job>__redo__<miner>", drawn from registered miners OUTSIDE the
+// original committee — and decides by MAJORITY OF THE FRESH STAKE. Weighting by stake rather than
+// by head is what stops a Sybil from outvoting the honest re-commits; excluding the original
+// committee is what stops the accused from sitting on its own retrial.
+//
+// Anyone may send it once the dispute window has elapsed.
+message MsgAdjudicateDispute {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgAdjudicateDisputeResponse is the response of MsgAdjudicateDispute.
+message MsgAdjudicateDisputeResponse {}
+
+// MsgCreateMiner defines the MsgCreateMiner message.
+message MsgCreateMiner {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+  string operator = 3;
+  string region = 4;
+  uint64 stake = 5;
+  string enc_pubkey = 6; // X25519 public key (hex) anchored at registration; clients encrypt to it.
+  string vrf_pubkey = 7; // Ed25519 VRF public key (hex) anchored at registration; ECVRF proofs verify against it.
+}
+
+// MsgCreateMinerResponse defines the MsgCreateMinerResponse message.
+message MsgCreateMinerResponse {}
+
+// MsgUpdateMiner defines the MsgUpdateMiner message.
+message MsgUpdateMiner {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+  string operator = 3;
+  string region = 4;
+  uint64 stake = 5;
+}
+
+// MsgUpdateMinerResponse defines the MsgUpdateMinerResponse message.
+message MsgUpdateMinerResponse {}
+
+// MsgDeleteMiner defines the MsgDeleteMiner message.
+message MsgDeleteMiner {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+}
+
+// MsgDeleteMinerResponse defines the MsgDeleteMinerResponse message.
+message MsgDeleteMinerResponse {}
+
+// MsgCreateJob defines the MsgCreateJob message.
+message MsgCreateJob {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string client = 3;
+  string miner_id = 4;
+  uint64 fee = 5;
+  string state = 6;
+}
+
+// MsgCreateJobResponse defines the MsgCreateJobResponse message.
+message MsgCreateJobResponse {}
+
+// MsgUpdateJob defines the MsgUpdateJob message.
+message MsgUpdateJob {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string client = 3;
+  string miner_id = 4;
+  uint64 fee = 5;
+  string state = 6;
+}
+
+// MsgUpdateJobResponse defines the MsgUpdateJobResponse message.
+message MsgUpdateJobResponse {}
+
+// MsgDeleteJob defines the MsgDeleteJob message.
+message MsgDeleteJob {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgDeleteJobResponse defines the MsgDeleteJobResponse message.
+message MsgDeleteJobResponse {}
+
+// MsgCreatePools defines the MsgCreatePools message.
+message MsgCreatePools {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 miner_paid = 3;
+  uint64 validators = 4;
+  uint64 team = 5;
+  uint64 treasury = 6;
+}
+
+// MsgCreatePoolsResponse defines the MsgCreatePoolsResponse message.
+message MsgCreatePoolsResponse {}
+
+// MsgUpdatePools defines the MsgUpdatePools message.
+message MsgUpdatePools {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 miner_paid = 3;
+  uint64 validators = 4;
+  uint64 team = 5;
+  uint64 treasury = 6;
+}
+
+// MsgUpdatePoolsResponse defines the MsgUpdatePoolsResponse message.
+message MsgUpdatePoolsResponse {}
+
+// MsgDeletePools defines the MsgDeletePools message.
+message MsgDeletePools {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+}
+
+// MsgDeletePoolsResponse defines the MsgDeletePoolsResponse message.
+message MsgDeletePoolsResponse {}
+
+// MsgSettleJob defines the MsgSettleJob message.
+message MsgSettleJob {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgSettleJobResponse defines the MsgSettleJobResponse message.
+message MsgSettleJobResponse {}
+
+// MsgSlashMiner defines the MsgSlashMiner message.
+message MsgSlashMiner {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+}
+
+// MsgSlashMinerResponse defines the MsgSlashMinerResponse message.
+message MsgSlashMinerResponse {}
+
+// MsgClaimSubsidy defines the MsgClaimSubsidy message.
+message MsgClaimSubsidy {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+}
+
+// MsgClaimSubsidyResponse defines the MsgClaimSubsidyResponse message.
+message MsgClaimSubsidyResponse {}
+
+// MsgReportDivergence defines the MsgReportDivergence message.
+message MsgReportDivergence {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string miner_commit = 3;
+  string correct_commit = 4;
+}
+
+// MsgReportDivergenceResponse defines the MsgReportDivergenceResponse message.
+message MsgReportDivergenceResponse {}
+
+// MsgRewardTraining defines the MsgRewardTraining message.
+message MsgRewardTraining {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+  uint64 units = 3;
+}
+
+// MsgRewardTrainingResponse defines the MsgRewardTrainingResponse message.
+message MsgRewardTrainingResponse {}
+
+// MsgPayReal defines the MsgPayReal message.
+message MsgPayReal {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string recipient = 2;
+  uint64 amount = 3;
+}
+
+// MsgPayRealResponse defines the MsgPayRealResponse message.
+message MsgPayRealResponse {}
+
+// MsgCreateCommit defines the MsgCreateCommit message.
+message MsgCreateCommit {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string prompt_commit = 3;
+  string result_commit = 4;
+  string kind = 5;
+  string model_id = 6; // Model served.
+  string weights_hash = 7; // Hash of the weights served, checked against the model registry.
+}
+
+// MsgCreateCommitResponse defines the MsgCreateCommitResponse message.
+message MsgCreateCommitResponse {}
+
+// MsgUpdateCommit defines the MsgUpdateCommit message.
+message MsgUpdateCommit {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string prompt_commit = 3;
+  string result_commit = 4;
+  string kind = 5;
+}
+
+// MsgUpdateCommitResponse defines the MsgUpdateCommitResponse message.
+message MsgUpdateCommitResponse {}
+
+// MsgDeleteCommit defines the MsgDeleteCommit message.
+message MsgDeleteCommit {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgDeleteCommitResponse defines the MsgDeleteCommitResponse message.
+message MsgDeleteCommitResponse {}
+
+// MsgFinalizeJob defines the MsgFinalizeJob message.
+message MsgFinalizeJob {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgFinalizeJobResponse defines the MsgFinalizeJobResponse message.
+message MsgFinalizeJobResponse {}
+
+// MsgSettlePay defines the MsgSettlePay message.
+message MsgSettlePay {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  uint64 amount = 3;
+}
+
+// MsgSettlePayResponse defines the MsgSettlePayResponse message.
+message MsgSettlePayResponse {}
+
+// MsgOpenJob defines the MsgOpenJob message.
+message MsgOpenJob {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  uint64 fee = 3;
+}
+
+// MsgOpenJobResponse defines the MsgOpenJobResponse message.
+message MsgOpenJobResponse {}
+
+// MsgPayout defines the MsgPayout message.
+message MsgPayout {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  uint64 amount = 3;
+}
+
+// MsgPayoutResponse defines the MsgPayoutResponse message.
+message MsgPayoutResponse {}
+
+// MsgVerifySemantic defines the MsgVerifySemantic message.
+message MsgVerifySemantic {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  uint64 threshold_bps = 3;
+}
+
+// MsgVerifySemanticResponse defines the MsgVerifySemanticResponse message.
+message MsgVerifySemanticResponse {}
+
+// MsgCreateBeacon defines the MsgCreateBeacon message.
+message MsgCreateBeacon {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string seed = 3;
+}
+
+// MsgCreateBeaconResponse defines the MsgCreateBeaconResponse message.
+message MsgCreateBeaconResponse {}
+
+// MsgUpdateBeacon defines the MsgUpdateBeacon message.
+message MsgUpdateBeacon {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string seed = 3;
+}
+
+// MsgUpdateBeaconResponse defines the MsgUpdateBeaconResponse message.
+message MsgUpdateBeaconResponse {}
+
+// MsgDeleteBeacon defines the MsgDeleteBeacon message.
+message MsgDeleteBeacon {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+}
+
+// MsgDeleteBeaconResponse defines the MsgDeleteBeaconResponse message.
+message MsgDeleteBeaconResponse {}
+
+// MsgSettleSemantic defines the MsgSettleSemantic message.
+message MsgSettleSemantic {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  uint64 reward = 3;
+  uint64 threshold_bps = 4;
+}
+
+// MsgSettleSemanticResponse defines the MsgSettleSemanticResponse message.
+message MsgSettleSemanticResponse {}
+
+// MsgProveAvailability is how a miner proves it is available: it answers the CHALLENGE of the
+// current epoch, which is the app hash of the epoch boundary block. Because that hash is not known
+// before the boundary, an answer cannot be precomputed ahead of the challenge. Signed by the
+// miner's OPERATOR.
+message MsgProveAvailability {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+  string challenge = 3;
+  string vrf_proof = 4; // ECVRF proof over the challenge (hex, 80 bytes). Required when the miner has a vrf_pubkey.
+}
+
+// MsgProveAvailabilityResponse defines the MsgProveAvailabilityResponse message.
+message MsgProveAvailabilityResponse {}
+
+// MsgSubmitVrfBeacon sets the verifiable VRF seed of a job, sent by the beacon authority.
+message MsgSubmitVrfBeacon {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string job_id = 2;
+  string vrf_proof = 3; // ECVRF proof (hex, 80 bytes) over job_id, verified against params.vrf_beacon_pubkey.
+}
+
+// MsgSubmitVrfBeaconResponse is the response of MsgSubmitVrfBeacon.
+message MsgSubmitVrfBeaconResponse {}
+
+// MsgRotateMinerKeys rotates a miner's anchored keys, sent by its operator.
+message MsgRotateMinerKeys {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string miner_id = 2;
+  string new_enc_pubkey = 3; // Empty leaves the current key unchanged.
+  string new_vrf_pubkey = 4; // Empty leaves the current key unchanged.
+}
+
+// MsgRotateMinerKeysResponse is the response of MsgRotateMinerKeys.
+message MsgRotateMinerKeysResponse {}
+
+// MsgRegisterValidatorVrfKey anchors a VALIDATOR's Ed25519 VRF PUBLIC key on-chain, signed by its
+// operator account. Consensus uses that key to VERIFY the validator's VRF vote extensions, which in
+// turn feed the decentralized committee seed.
+//
+// Self-authorizing: a signer anchors its OWN key, and a key registered under any other account is
+// never consulted. This stays dormant until vote extensions are enabled at a height.
+message MsgRegisterValidatorVrfKey {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string vrf_pubkey = 2; // Ed25519 VRF public key (hex, 32 bytes).
+  // Proof of possession: a VRF proof (hex, 80 bytes) over "dendra/vrf-pop/<creator>". Binding the
+  // proof to the signer's own address stops a validator from registering a key it does not hold,
+  // which would let it disown the vote extensions produced under that key.
+  string vrf_pop = 3;
+}
+// MsgRegisterValidatorVrfKeyResponse is the response of MsgRegisterValidatorVrfKey.
+message MsgRegisterValidatorVrfKeyResponse {}

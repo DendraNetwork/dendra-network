@@ -1,0 +1,181 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/jobs/types";
+
+// Params holds the economic and security parameters of the jobs module (ADR-017, ADR-018).
+// Every *_bps field is expressed in basis points: 1 bps = 1/10000, so 10000 = 100%.
+//
+// Many fields below are DORMANT at their zero value: the keeper then reproduces the behaviour that
+// existed before the feature was introduced. Turning one on is a governance act, and each such
+// field states what changes when it stops being zero.
+message Params {
+  option (amino.name) = "dendra/x/jobs/Params";
+  option (gogoproto.equal) = true;
+
+  // WITHDRAWN FIELD NUMBERS. Each of these was DISPLAYED by `query jobs params` and read by no line
+  // of production code: a governance vote on any of them passed and changed nothing, which is worse
+  // than an absent lever because the decision had the appearance of having taken place.
+  //
+  //   6  miner_vest_blocks  — vesting duration for a schedule that was never built. `pools.MinerLocked`
+  //                           has a single writer and no decrement, so the quantity it names is a
+  //                           historical total, not a balance awaiting release.
+  //   8  burn_bps           — burn leg of an intended slash split. The whole slashed amount is credited
+  //   9  reporter_bps       — reporter leg of the same split. to `pools.Treasury`; no coin is burned and
+  //                           no reporter is paid. The two legs do not even sum to 10000, so the third
+  //                           leg was never decided: wiring them is a design act, not a connection.
+  //   12 demand_client_cap  — per distinct client, PER EPOCH cap on the demand counted toward a miner's
+  //                           subsidy base (ADR-017). That semantics requires an epoch-bucketed demand
+  //                           ledger; this chain accumulates demand as one LIFETIME counter on the
+  //                           miner, so the cap cannot be connected without first replacing the base it
+  //                           is supposed to bound. A lifetime cap would instead stop counting the
+  //                           network's best real customer.
+  //
+  // The numbers are reserved, never recycled: a node built before the withdrawal that meets a message
+  // built after it must not decode a NEW field as one of these. The subsidy stays bounded by
+  // work_gate_bps, which is read and tested.
+  reserved 6, 8, 9, 12;
+  reserved "miner_vest_blocks", "burn_bps", "reporter_bps", "demand_client_cap";
+
+  uint64 min_stake = 1; // Minimum stake (udndr) a miner must bond to be eligible for work.
+  uint64 protocol_fee_bps = 2; // Protocol cut taken from the job fee; 1500 = 15%.
+  uint64 validator_reward_bps = 3; // Validator share OF THAT CUT; 5000 = 50% of the cut, not of the fee.
+  uint64 team_fee_bps = 4; // Team share of the cut; 2000 = 20% of the cut.
+  // Fraction of the miner's share HELD BACK at settlement; 3000 = 30%. Read by the authority-gated
+  // legacy settlement only, where it splits the payment between `pools.MinerPaid` and
+  // `pools.MinerLocked`. There is NO release schedule: what it holds back is retained, not vested.
+  uint64 miner_vest_bps = 5;
+  uint64 slash_leak_bps = 7; // Fraction of a slashed miner's stake actually removed; 8000 = 80%.
+  // RESERVED. Epoch length for this module, read by nothing: the epoch that actually drives
+  // emission is a parameter of the emission module, and availability has its own period in
+  // avail_epoch_blocks. Setting this field changes no behaviour here.
+  uint64 epoch_blocks = 10;
+  // Work gate on the subsidy: a miner can claim at most demand * work_gate_bps / 10000, so 15000
+  // caps the claim at 1.5x the non-recoverable demand it actually served. The gate is what keeps a
+  // wash trade negative-EV — buying your own demand must cost more than the subsidy it unlocks.
+  uint64 work_gate_bps = 11;
+  uint64 fee_burn_bps = 13; // Fraction of the job escrow burned before the rest is split; 0 = no burn at settlement.
+  // Off by default. When on, CreateCommit requires a model that is registered and active, so a
+  // miner cannot bill for a model the network has never seen.
+  bool enforce_model_registry = 14;
+  // 0 (default): the committee seed is fixed when the job opens, which is adequate only on a
+  // development network. >0: the seed is REVEALED N blocks LATER, taken from the app hash of a
+  // future block. A seed knowable at open time lets the party choosing when to open a job grind it
+  // until the committee draw favours them; a seed that does not exist yet cannot be ground.
+  uint64 committee_reveal_delay = 15;
+  // 0 (default): availability is off. >0: period, in blocks, of the availability challenge and of
+  // the payout drawn from the availability pool.
+  uint64 avail_epoch_blocks = 16;
+  // Fraction of the availability pool paid out per availability epoch (1/10000); 0 pays nothing.
+  uint64 avail_payout_bps = 17;
+  // Off by default. When on, only miners that served real demand (demand > 0) draw from the
+  // availability pool. Liveness alone can be farmed by a process holding no GPU at all, so paying
+  // for liveness alone funds exactly the participant the pool is meant to exclude.
+  bool avail_require_demand = 18;
+  // VRF public key (hex, 32 bytes) of the beacon authority. Empty disables it, and seeds fall back
+  // to app-hash revelation.
+  string vrf_beacon_pubkey = 19;
+  // 0 (default): legacy seed (height:time / app hash). 1: DECENTRALIZED VRF, the seed aggregated
+  // from validator vote extensions. A single-source seed is only as unpredictable as the party that
+  // produces it; aggregation removes that party.
+  uint64 committee_seed_source = 20;
+  // Fraud proof / dispute: bonded re-adjudication of a settled verdict (see
+  // docs/DISPUTE-FRAUDPROOF.md). Off by default.
+  uint64 dispute_window = 21; // 0 (default): disputes DISABLED. >0: enabled, and the window is N blocks.
+  // Bond (udndr) escrowed to challenge a verdict. The bond is what makes the dispute permissionless
+  // without making it free: anyone may contest, a losing challenger pays for the network's time.
+  uint64 dispute_bond = 22;
+  // Optimistic verification by VRF sampling (ADR-025). Dormant by default.
+  // 0 (default): redundant verification, k = 3 miners answer every job and are compared.
+  // 1: optimistic, k = 1 answers, a sampled subset is audited, and a caught liar is slashed hard.
+  // Optimistic mode trades redundancy for a penalty: the deterrent must exceed what cheating pays,
+  // which is why audit_sample_bps and slash_leak_bps are checked against each other at open time.
+  uint64 verification_mode = 23;
+  uint64 audit_sample_bps = 24;  // Audit probability in optimistic mode (1/10000; 1000 = 10%); 0 audits nothing.
+  // Optional refinements of the audit draw, all dormant at 0.
+  // 0: off. >0: reference fee. The effective rate becomes audit_sample_bps * (1 + fee/reference),
+  // capped at 10000, so a job worth more to cheat on is audited more often.
+  uint64 audit_adaptive = 25;
+  // 0: off. N: a miner is audited at 100% over its first N optimistic jobs. A fresh identity is
+  // exactly the one whose behaviour is unknown, so a Sybil pays full verification before it can
+  // benefit from sampling.
+  uint64 audit_probation_jobs = 26;
+  // 0: off. >0: an audit still unresolved after N blocks is auto-vindicated at end of block. An
+  // audit that no one resolves would otherwise hold the payment forever; liveness of the settlement
+  // path must not depend on a juror showing up.
+  uint64 audit_resolve_timeout = 27;
+  // Full-compliance levers of ADR-028: three governable parameters, all dormant at 0. While they
+  // are 0 the keeper reproduces the earlier behaviour exactly, so enabling them is a deliberate
+  // governance act and never a side effect of an upgrade.
+  //
+  // 0 (dormant): a silent primary costs only the light clawback. >0: an ADDITIONAL stake penalty
+  // (stake * bps / 10000, refundable, routed to the treasury) on the no-quorum clawback. A primary
+  // that stays silent when its answer is questioned otherwise pays less than one that answers and
+  // is caught.
+  uint64 silence_slash_bps = 28;
+  // 0 (dormant): restitution goes through governance. >0: number of blocks allowed for a late
+  // reveal, making the appeal permissionless. RESERVED: the value is stored and validated but not
+  // yet consumed by the state machine, so setting it has no effect on adjudication today.
+  uint64 appeal_window = 29;
+  // 0 (dormant): the participation floor is the default ceil(CommitteeSize/2)+1. >0: a governed
+  // floor, expressed as a WHOLE NUMBER of distinct fresh judges required before a hard slash. A
+  // floor in seats rather than in fractions is what a quorum check can be read against directly.
+  uint64 audit_min_quorum = 30;
+  // Fee hold: makes the optimistic payment genuinely provisional.
+  // 0 (dormant): the optimistic payment is released in full, immediately. >0: that fraction of the
+  // payment is HELD by the module until the audit window closes, then released to the primary if it
+  // is vindicated or never audited, and refunded to the client otherwise. The refund is always
+  // taken from the HELD FEE, never from the bond: a bond answers for misconduct, not for a payment
+  // the protocol chose to advance.
+  uint64 hold_bps = 31;
+  // Floor on the number of contributors below which the decentralized seed is not decentralized
+  // enough to draw a committee on an incentivized network.
+  // 0 (dormant): no minimum, and only the total absence of a seed raises an alert. >0: when
+  // committee_seed_source = 1 and the seed has fewer than N contributors, the chain raises a VISIBLE
+  // alert and falls back to the legacy seed. It never halts: a chain that stops on a weak seed
+  // converts a randomness problem into an availability problem.
+  // Suggested setting for an incentivized testnet: ceil(2/3 of the expected validator set), fixed
+  // for the run. A live ceil(2N/3) tracking the actual set requires wiring the staking keeper.
+  // Raise it as the validator set grows.
+  uint64 committee_min_vrf_contributors = 32;
+  // Slashable availability by VRF-sampled challenge, the "proof of availability" of ADR-022. Each
+  // epoch the keeper draws a subset of bonded miners from the decentralized seed and sends each one
+  // a challenge INDISTINGUISHABLE from a real job; a failure (no answer by the deadline, or an
+  // answer that is semantically wrong) counts against the miner, and a bounded slash follows only
+  // once a quorum of failures is reached.
+  //
+  // All six fields are dormant at 0 and stay inert until avail_epoch_blocks > 0 AND they are set.
+  //
+  // 0 (dormant): the challenge answer is not checked semantically. >0: cosine threshold (1/10000)
+  // below which the answer is judged wrong, using the same comparison as semantic verification.
+  uint64 avail_threshold_bps = 33;
+  // 0 (dormant): no deadline, so no challenge is ever due. >0: blocks the challenged miner has to
+  // answer before a FAILURE is recorded.
+  uint64 avail_deadline_blocks = 34;
+  // 0 (dormant): availability never slashes. >0: fraction of stake (1/10000) slashed once the
+  // failure quorum is reached.
+  uint64 avail_slash_bps = 35;
+  // 0 (dormant): no upper bound. >0: ABSOLUTE cap (udndr) on one availability slash, so the applied
+  // amount is min(stake * avail_slash_bps / 10000, avail_slash_max). The cap bounds what a
+  // misconfigured threshold can cost the largest miner on the network.
+  uint64 avail_slash_max = 36;
+  // 0 (dormant): empty window, so the quorum is never reached. >0: length, in EPOCHS, of the
+  // sliding window over which one miner's failures are counted.
+  uint64 avail_fail_window = 37;
+  // 0 (dormant): never slashes. >0: number of FAILURES within avail_fail_window required to trigger
+  // the slash. A single missed challenge is a network hiccup, not evidence of absence, and slashing
+  // on one sample bills honest operators for the transport layer.
+  uint64 avail_fail_k = 38;
+  // Governable VITALITY windows (ADR-034 section 5). These are values that will have to be
+  // recalibrated against real data — the p99 of the interval between commits of honest miners —
+  // and a value known in advance to need recalibration must not require a binary upgrade.
+  // 0 (dormant): the compiled defaults in miner_vitality.go apply (juror freshness about 3 days,
+  // 259200 blocks; pruning about 7 days, 604800).
+  // Direction of safety: too short BILLS AN OUTAGE TO AN HONEST MINER, which is the failure these
+  // windows exist to avoid; too long merely under-punishes.
+  uint64 juror_freshness_blocks = 39; // >0: recency window a miner must satisfy to SIT on a jury.
+  uint64 miner_prune_blocks = 40;     // >0: inactivity before a miner is PRUNED; keep it above juror_freshness_blocks.
+}
