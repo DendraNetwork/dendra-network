@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: Dendra
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

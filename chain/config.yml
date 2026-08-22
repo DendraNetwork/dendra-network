@@ -1,0 +1,171 @@
+version: 1
+validation: sovereign
+default_denom: udndr
+build:
+  main: cmd/dendrad  # disambiguates the chain main (cmd/dendra-vrf is a second main)
+accounts:
+- name: alice
+  coins:
+  - 2700000000000udndr      # 2.7 M — validator (1 M bonded)
+- name: bob
+  coins:
+  - 100000000000udndr       # 0.1 M — faucet float (reduced by 3.3 M: the Reserve goes to x/emission)
+- name: communaute
+  coins:
+  - 3400000000000udndr      # 3.4 M (reduced by 0.1 M -> bob's faucet float)
+- name: equipe
+  coins:
+  - 500000000000udndr       # 0.5 M
+# RESERVE (33 % = 3.3 M DNDR) held by the x/emission MODULE ACCOUNT FROM GENESIS ON (ADR-023).
+# Address = authtypes.NewModuleAddress("emission"). Released by RunEpoch (BeginBlock) -> fee_collector.
+# The fixed 10 M supply is preserved: -3.2 M (bob) -0.1 M (communaute) = +3.3 M (emission). ZERO minting.
+- name: emission_reserve
+  address: dendra1q6tym5h6cd3cxcqua9eflkf5rct8c6rsn92wrf
+  # module_name declares this pocket as the REAL "emission" ModuleAccount (auth.GenesisAccount, see
+  # app/genesis_account.go). The address above equals authtypes.NewModuleAddress("emission") =
+  # sha256("emission")[:20], verified in bech32. Without module_name, ignite creates a BaseAccount at
+  # that address; with it, the account is typed as a ModuleAccount from genesis on, so
+  # SendCoinsFromModuleToAccount (PayWork/PayAvail) starts from an ALREADY funded account. Permissions
+  # are empty, consistent with app_config.go: emission does not mint.
+  module_name: emission
+  module_permissions: []
+  coins:
+  - 3300000000000udndr      # 3.3 M — the Reserve
+client:
+  openapi:
+    path: docs/static/openapi.json
+faucet:
+  name: bob
+  coins:
+  - 10000000udndr
+validators:
+- name: alice
+  bonded: 1000000000000udndr
+genesis:
+  app_state:
+    staking:
+      params:
+        bond_denom: udndr
+    # CONSENSUS DOWNTIME. Held IDENTICAL in the three genesis paths of this repository (this file,
+    # config.optimistic.yml, docker/entrypoint-chain.sh); the full reasoning is written ONCE, in
+    # docker/entrypoint-chain.sh, next to the fatal range guard that enforces it. Read it there.
+    #
+    # What matters here, in the unit the chain counts. `HandleValidatorSignature` computes
+    #     maxMissed := signedBlocksWindow - round(signedBlocksWindow * minSignedPerWindow)
+    # (x/slashing/keeper/infractions.go:110) and jails plus slashes above it (:113). Left unwritten, a
+    # genesis inherits the SDK defaults -- window 100, min_signed 0.5 -- so maxMissed is 50 and the 51st
+    # missed block jails the validator AND burns 1 % of its stake. That is 4 min 17 at the 5.03 s per
+    # block measured on the public endpoint, shorter than a router reboot or an image pull. 10000 - 8500
+    # = 1500 blocks of tolerance instead, about 2 h 06 under that same measured interval.
+    #
+    # AND THESE VALUES ARE NOT RESCALED FOR THE FAST DEVNET CADENCE ABOVE, UNLIKE avail_epoch_blocks.
+    # That is deliberate: avail_epoch_blocks is a CADENCE, so shortening it for a devnet is coherent;
+    # these five are a POLICY about what an operator on a real connection is allowed to miss, and a
+    # devnet running a single local validator misses nothing whatever they say. Keeping them identical
+    # across the three paths means the values an operator reads here are the values a deployment applies
+    # -- a devnet-only variant would be a second number to keep in sync, and eventually a wrong one.
+    slashing:
+      params:
+        signed_blocks_window: "10000"
+        min_signed_per_window: "0.850000000000000000"
+        downtime_jail_duration: "600s"
+        slash_fraction_double_sign: "0.050000000000000000"
+        slash_fraction_downtime: "0.000500000000000000"
+    # There is deliberately no `mint` section: x/mint is de-registered from the app (zero mint is
+    # STRUCTURAL, guaranteed by the binary). A section for an unregistered module fails the boot.
+    crisis:
+      constant_fee:
+        denom: udndr
+    gov:
+      params:
+        min_deposit:
+        - denom: udndr
+          amount: '100000000'
+        expedited_min_deposit:
+        - denom: udndr
+          amount: '200000000'
+    jobs:
+      params:
+        # WHY THIS FILE DOES NOT SET committee_seed_source, AND config.optimistic.yml DOES.
+        # This configuration leaves `verification_mode` at its default (0): settlement is by k=3
+        # REDUNDANCY, so the audit committee is not the path that decides whether a miner is paid.
+        # `config.optimistic.yml` runs mode 1 — one miner paid, a sampled audit, a hard slash — where
+        # the draw IS the security path, and it therefore pins committee_seed_source=1 and
+        # committee_min_vrf_contributors=2 with the reasoning written next to them.
+        # The difference is deliberate, not an omission: read it there before changing it here.
+        # 16 blocks is a FAST DEVNET cadence and is NOT the value the availability-slash calibration
+        # assumes. That calibration is sized on 300 blocks (config.optimistic.yml); at 16 an honest
+        # two-minute outage already spans more epochs than the failure count `avail_fail_k`, which is a
+        # FALSE SLASH. Harmless here only because the availability slash is DORMANT on this file: it
+        # posts none of `avail_slash_bps`, `avail_deadline_blocks`, `avail_fail_k`, `avail_fail_window`,
+        # so they keep the Go default of 0 and `runAvailabilitySlash` returns before doing anything
+        # (x/jobs/keeper/availability.go:165). Arming any of them here without first raising this cadence
+        # would slash honest operators.
+        avail_epoch_blocks: "16"
+        avail_payout_bps: "2000"
+        avail_require_demand: true   # anti-farming: only miners that served real demand draw from the AvailPool
+    modelregistry:
+      models:
+        - id: "llama3.1:8b-instruct-q4_K_M"
+          quant: "Q4_K_M"
+          engine: "ollama"
+          hw_class: "consumer-gpu"
+          active: true
+        - id: "all-MiniLM-L6-v2"
+          engine: "sentence-transformers"
+          active: true
+    # RESERVE RELEASE — calibrated on the LIFETIME of the Reserve, not on how visible one epoch is.
+    # Kept IDENTICAL to config.optimistic.yml, where the full rationale is written. In short:
+    #
+    # The curve is geometric — each epoch releases `reserve_release_bps` of what REMAINS, and the WORK
+    # share that demand does not justify stays in the Reserve (ADR-017) — so the Reserve halves rather
+    # than empties, and the HALF-LIFE is the only quantity worth calibrating. It is ~6932 epochs with no
+    # demand and ~3466 epochs with a saturated gate; both depend ONLY on the bps. epoch_blocks is what
+    # turns them into a duration.
+    #
+    # THE RATE CANNOT CARRY THIS CALIBRATION: `reserve_release_bps` is a uint64, so below 2 bps only
+    # 1 bps remains before 0, and 0 means "stop emitting", not "slower". At a 300-block epoch that last
+    # rung still halves the Reserve in ~13863 epochs, i.e. ~4.2 M blocks — weeks to months, whatever the
+    # interval turns out to be, and in no case the multi-year lifetime wanted; that would need ~0.13 bps,
+    # which the type cannot express. The EPOCH LENGTH is the adjustable quantity, not the rate.
+    #
+    # SHIPPED SETTING, STATED IN THE UNIT THE CHAIN ACTUALLY AGREES ON: 86400 blocks x 2 bps -> the
+    # Reserve halves in ~6932 epochs (idle) / ~3466 epochs (saturated gate), releases 330 DNDR (idle) /
+    # 660 DNDR (saturated) on the FIRST epoch of which 198 DNDR go to the SecurityPool, and still holds
+    # 96.4 % / 93.0 % of its initial amount after 365 epochs. None of those figures depend on how long a
+    # block takes.
+    #
+    # AND THE CONVERSION TO WALL-CLOCK TIME, WITH ITS HYPOTHESIS NAMED: at the x/chaintime target of
+    # 1 s per block an epoch is one day, so the half-lives read 19.0 years and 9.5 years. That target is
+    # NOT guaranteed by consensus — CometBFT derives the interval from validator `timeout_commit` and
+    # network propagation — and a measurement on the public endpoint gave about 5 s per block, which
+    # makes the same epochs last 5 days and the same half-lives about 95 and 47.5 years. Quote the epoch
+    # figures; quote a duration only next to the interval it assumes. The LIFETIME BAND is pinned by
+    # `app/emission_lifespan_test.go`, which is explicit that its band is expressed under that same
+    # hypothesis; the bps table is in docs/TOKENOMICS-CALIBRATION.md.
+    #
+    # The Go default (epoch_blocks about one year, bps=2200) stays a separate, faster curve and is not
+    # what a chain launched from this file uses.
+    emission:
+      params:
+        reserve_release_bps: "2"
+        work_split_bps: "5000"
+        avail_split_bps: "2000"
+        work_gate_bps: "15000"
+        # DISTINCT from jobs.avail_epoch_blocks (16 blocks above): availability challenges and their
+        # payouts keep their own fast cadence, only the Reserve release slows down.
+        epoch_blocks: "86400"
+    bank:
+      denom_metadata:
+      - description: Dendra — staking, fee and reward token
+        denom_units:
+        - denom: udndr
+          exponent: 0
+          aliases:
+          - microdnd
+        - denom: dndr
+          exponent: 6
+        base: udndr
+        display: dndr
+        name: Dendra
+        symbol: DNDR

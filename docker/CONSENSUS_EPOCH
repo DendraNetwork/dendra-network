@@ -1,0 +1,215 @@
+12
+# CONSENSUS EPOCH — bump this number (line 1) on every consensus-breaking change.
+# Read by deploy/launch/launch_public.sh (guard 3c): deploying an epoch different from the one the
+# RUNNING chain was started with, without DENDRA_FRESH=1, is a replay -> AppHash panic and a fork.
+# A bump therefore means: a FRESH GENESIS is mandatory, the running state cannot be carried over.
+#
+# Epoch contents:
+#  12 = admission, exit and the redo jury each consulted a set that was not the one that decides.
+#       Three fixes, one shape (ADR-045): a guard built for one question was being asked another.
+#       · ADMISSION. `enoughEligibleMinersToVerify` built its floor from the RAW `audit_min_quorum` and
+#         ABSTAINED at zero, on the written grounds that "there is no number to compare against here".
+#         There is one: `effectiveSlashFloor` returns 4 at zero, and it is the function the DRAW asks.
+#         MEASURED before the fix: in optimistic mode a job with four eligible miners was ACCEPTED, its
+#         escrow taken and its pool frozen -- and pools freeze at birth and never widen (ADR-037), so no
+#         jury it can draw will ever reach the floor. The SAME pool with the quorum governed to 4 -- the
+#         value the zero already selects -- was REFUSED. The floor is now `effectiveSlashFloor(p) + 1`
+#         and the refusal names the EFFECTIVE floor: printing the raw parameter announced 0 while
+#         demanding 5, so the refusal explained itself wrongly.
+#         ⚠️ REACHABLE AT QUORUM ZERO ONLY: the live chain governs `audit_min_quorum` to 4 and already
+#         demanded five, so production behaviour does not change. The epoch still moves -- it identifies
+#         the FUNCTION, and one MsgUpdateParams decides which branch is taken.
+#         Covered by quorum_zero_pool_floor_test.go (the refusal, the control that ONE more eligible
+#         miner is accepted, and that a refused job freezes no pool and books no fee), red under
+#         mutation. Cost paid in the fixtures: 23 tests opened jobs into pools that could never supply a
+#         jury -- ADR-045 recorded four, and the recorded number was the one that was wrong.
+#       · WORK COMMITTEE. ADR-037 froze WHO may be drawn and WHEN vitality is evaluated; the third
+#         input -- the ordering WEIGHT -- was still read LIVE from the miner record. Slashing a
+#         MEMBER for an UNRELATED job therefore moved an open job's committee: MEASURED,
+#         [cm2 cm1 cm5] became [cm2 cm5 cm6]. The member that had answered was no longer assigned, a
+#         stranger was, and the settlement refused for an incomplete committee -- an escrow with no
+#         path left. Control: slashing a NON-member changed nothing, so what moved the draw was the
+#         weight of a DRAWN miner.
+#         The committee is now ANCHORED in its own collection (`work_committee`, carried by genesis)
+#         and read from there. A DEDICATED store, not a key namespace inside `audit_committee`:
+#         three consumers read every entry of that one as a JURY SEAT, so a work committee lodged
+#         there would be two meanings in one structure -- the very shape this fix closes.
+#         ⚠️ IT IS ANCHORED AT THE FIRST MOMENT IT EXISTS, NOT AT `OpenJob`. With a reveal delay the
+#         beacon seed is not there yet and nothing can be drawn, so the anchoring happens in the
+#         EndBlocker that reveals it. Both hooks are driven end to end, and that mattered: written
+#         first just after the seed, the anchoring silently anchored NOTHING -- the freeze height it
+#         derives from is stored further down, and the read falls back to the derivation, so the
+#         failure was invisible. Covered by committee_weight_not_frozen_test.go, red under mutation
+#         on all four cases, the non-member control staying green.
+#       · CLIENT SETTLEMENT. `SettlePay` pays the winners from the CLIENT's own wallet -- deliberate
+#         and unchanged -- but it appended `+settled`, which is TERMINAL: `expireUnservedJob` refunds
+#         only a state that is exactly "open", and `Payout` / `SettleSemantic` / `SettleJob` all
+#         refuse through `jobIsPaid`. So the escrow `OpenJob` took became unreachable for good.
+#         MEASURED: the client pays TWICE, one payment reaches nobody, and after every disbursement
+#         entry point plus the EndBlocker at the booked appointment the escrow has not moved.
+#         Two settlement notions were treading on each other: `SettleSemantic` is the PROTOCOL path
+#         (it judges, pays and EMPTIES the escrow), `SettlePay` is the CLIENT path. A job that still
+#         holds the escrow is now REFUSED by `SettlePay`, and the refusal NAMES the path that works.
+#         Refusing is the option that MOVES NO FUNDS: releasing the escrow here would make this
+#         handler disburse module money on a client's say-so, which it was built not to do.
+#         Covered by settlepay_strands_escrow_test.go (the refusal, that nothing was written, and
+#         that the escrow stays RELEASABLE afterwards), red under mutation.
+#       · EXIT. `hasOpenObligation` walked held fees, audit seats and disputed jobs, and read NEITHER
+#         `Commit` NOR the work committee, so a member that had ALREADY ANSWERED was held by no clause.
+#         MEASURED: committee [sc sb sa], all three committed; `sb` unregisters AFTER answering and is
+#         accepted; the committee is re-derived from the LIVE registry, so it comes back [sc sa];
+#         `SettlePay` then refuses for an incomplete committee and the job keeps its fee. NO ADVERSARY
+#         IS NEEDED -- eviction goes through the same predicate, so an honest miner going quiet does it.
+#         The hold is bounded BY THE JOB (paid or settled, escrow returned, resolved) and never by the
+#         miner's goodwill -- the trap the audit-seat clause had to be relaxed to avoid, since an
+#         identity whose key is lost can never act again and must still be able to leave.
+#       · REDO JURY. The anti-collusion exclusion removed the ASSIGNED, while `CreateCommit` requires
+#         neither assignment nor a draw: the set that produced the contested commits is
+#         `{mid : Commit[jobId__mid] exists}`, which the adjudication re-reads when it tallies.
+#         MEASURED: `co0`, assigned to nothing, anchored a commit and then sat on the jury that
+#         re-judged its own result, and the vote filter did not exclude it either. Authors are now
+#         excluded at BOTH sites, UNIONED with the draw -- a drawn member that stayed silent must still
+#         not judge the job it was summoned to. And a seat whose holder may not vote is no longer
+#         counted as a seat: `redoSeats` subtracts the excluded, or every exclusion would shrink the
+#         numerator while leaving the quorum bar exactly where it was.
+#  11 = `model_id` and `weights_hash` are bounded like the three commit fields beside them.
+#       `CreateCommit` bounds result_commit, prompt_commit and kind because, in its own words, a single
+#       transaction could otherwise carry roughly a mebibyte of permanent state. The two fields the
+#       model registry adds are written by the SAME store call, three lines below that list, and
+#       carried no bound. MEASURED before the fix: a commit with 1 MiB in EACH field was ACCEPTED and
+#       stored -- 2 MiB of permanent state from one transaction -- and it cannot be reclaimed, since
+#       DeleteCommit refuses by design (tally evasion). Blocks carry no gas limit here and validators
+#       run at a zero minimum gas price, so the write costs a transaction.
+#       Bounds DERIVED where the chain declares something: weights_hash at 2*sha256.Size, the hex length
+#       of the digest it is compared against. model_id has NO declared bound anywhere -- x/modelregistry
+#       bounds neither ids nor digests -- so it is anchored on the longest id the shipped configuration
+#       names (34 bytes) with room for the family, and the code says plainly that this is then the only
+#       bound in the system: a model registered with a longer id would become uncommittable, which is a
+#       reason for the registry to grow its own.
+#       Covered by commit_registry_fields_bounded_test.go (refusal per field with nothing written, a
+#       realistic commit that still passes, and the boundary itself), red under mutation on each bound.
+#  10 = at the vote-extension ENABLE HEIGHT itself, the PreBlocker no longer aggregates the injected
+#       envelope. Two predicates differ by one height on purpose -- `voteExtensionsRecording` (>=)
+#       records this block's hash because the aggregation at E+1 reads it back, `voteExtensionsActive`
+#       (>) decides whether extensions may be CONSUMED. The consumption block was gated on the wider
+#       one. At H == E `newProcessProposalHandler` delegates the whole block -- envelope included -- to
+#       `next`, and `next` is `NoOpProcessProposal`: the default handler is built with
+#       `mempool.NoOpMempool{}`, and cosmos-sdk v0.53.6 `baseapp/abci_utils.go` (`NoOpProcessProposal`) returns an
+#       unconditional ACCEPT for a NoOp mempool. So nothing validated that envelope, and the PreBlocker
+#       still wrote DecentralizedSeed, the contributor COUNT and the contributor POWER from it -- while
+#       `aggregateSeed` derives the BFT 2/3 power floor as a ratio of powers read from that same
+#       envelope, so the floor is met by construction. That seed freezes committees, i.e. decides who
+#       is paid. The handler's own INVARIANT names the moment: the exemption 'would open at the PRECISE
+#       moment vote_extensions_enable_height is reached'; it was closed on the validating branch and
+#       left open on the branch that skips validation.
+#       ⚠️ REACHABLE THROUGH THIS REPOSITORY'S OWN TOOLING: the rescue script sets
+#       enable_height = initial_height + 1, precisely the block where a restored backlog comes due.
+#       Refusing at E costs nothing: CometBFT delivers extensions only from E+1, so a well-formed
+#       envelope cannot exist there -- only a forged one can.
+#       ⚠️ AND THE FIRST FIX WAS INVISIBLE TO EVERY TEST. Written inline in the PreBlocker closure,
+#       removing it left the ENTIRE module green -- measured. The decision is now a named function the
+#       shipped PreBlocker CALLS (`preBlockerMayAggregate`), and
+#       vote_extensions_enable_height_test.go drives that function: red under mutation.
+#   9 = a slash cannot exceed the bond it takes from, nor a burn the fee it comes out of.
+#       `Params.Validate` bounded NINE bps parameters from above; `slash_leak_bps` carried a FLOOR
+#       only (2500, optimistic mode) and `fee_burn_bps` had none. MEASURED before the fix, by running
+#       it: Validate returned nil at 20000 for both, a permissionless VerifySemantic then SUCCEEDED,
+#       and the punished miner's bond went 1000 -> 18446744073709550616 while the Treasury was
+#       credited 2000 coins the bond never held. The audit jury draw reads the RAW stake (the
+#       assignment cap covers the WORK draw only), so the slashed cheater would take every seat, and
+#       payAvailability sums the same field to split the epoch budget. One percent-for-bps slip posts
+#       it, and four of the seven slash sites are permissionless.
+#       ⚠️ ONLY THESE TWO, measured field by field rather than by shape: `validator_reward_bps` is
+#       already bounded by the SUM check `validator+team > 10000`, and `work_gate_bps` is DELIBERATELY
+#       above 10000 (the live chain serves 15000) because it scales a subsidy against demand instead
+#       of splitting a total -- bounding it for consistency would have refused production.
+#       Covered by slash_above_the_bond_test.go (the door, what the handlers alone still do, and a
+#       legal-calibration control including exactly 100 %), red under mutation on each bound.
+#       ⚠️ A STATE TRANSITION: `MsgUpdateParams` calls `Validate`, so two binaries disagree on a
+#       params message the old one accepts.
+#   8 = a dispute system that can be OPENED must have a DEADLINE, in every mode. `Params.Validate`
+#       coupled `audit_resolve_timeout` to `dispute_window` only under verification_mode=1. In k=3
+#       mode nothing did, and `DisputeVerdict` gates only on `dispute_window == 0`, while the block
+#       that books the resolve appointment sits inside `if audit_resolve_timeout > 0`. So
+#       `dispute_window > 0` beside `audit_resolve_timeout = 0` was a legal set, one MsgUpdateParams
+#       away. MEASURED there before the fix: the dispute is accepted, the bond leaves the disputer,
+#       the job is marked, NO appointment exists at any height, and a hundred thousand blocks later
+#       nothing has closed -- the handler's own comment says it pays for that appointment precisely
+#       because too few or silent jurors would leave the job +disputed for ever.
+#       The clause is now general, guarded by `dispute_window > 0`; the DEFAULTS are 0/0, so a
+#       dormant dispute system trips nothing. Covered by dispute_deadline_unarmed_test.go (the door,
+#       what the handler alone still does, and the armed control), red under mutation when the clause
+#       is put back behind verification_mode == 1.
+#       ⚠️ A STATE TRANSITION, not only a load-time refusal: `MsgUpdateParams` calls `Validate`
+#       (msg_update_params.go), so two binaries disagree on a params message the old one accepts.
+#       ⚠️ AND THE FIRST ATTEMPT HAD NO EFFECT AT ALL: the clause was written with the indentation of
+#       the outer level while the braces kept it inside the mode-1 block. Build, vet and eight test
+#       packages stayed green because nothing changed. Scope is measured by counting braces, never by
+#       reading the margin.
+#   7 = SettleSemantic asks the UNIFIED anti-double-slash predicate (`jobK3Adjudicated`) instead of
+#       testing the single word "finalized". "+verified", written by VerifySemantic, matched neither
+#       that test nor `jobIsPaid`, so the fourth edge of the square was open: verify then
+#       settle-semantic judged the SAME immutable commits twice and took slash_leak_bps of the
+#       REMAINDER. MEASURED by running the sequence, not read: 1000 -> 200 -> 40, i.e. ~96 % of an
+#       honest miner's bond for one piece of work, on two permissionless calls costing only gas.
+#       `jobK3Adjudicated`'s own doc-comment describes this compounding and two of the three paths
+#       already asked it -- the rule was written down and applied in two files out of three.
+#       The exit stays open and is asserted, not assumed: Payout guards on `jobIsPaid` alone, so a
+#       judged-but-unpaid job is still paid ONCE
+#       (compound_slash_verify_then_settle_test.go::TestAVerifiedJobIsStillPayableThroughPayout).
+#       Red under mutation (guard put back to "finalized"), the two neighbouring edges staying green.
+#       ⚠️ REACHABLE IN MODE 0 ONLY. On the live chain (verification_mode=1) VerifySemantic refuses
+#       before anything, so no job is ever marked "+verified" and the two binaries agree on every
+#       reachable input. The epoch still moves: it identifies the FUNCTION, not what one parameter
+#       set happens to reach -- and that parameter changes with a single MsgUpdateParams.
+#   5 (suite) = the emission genesis backing guard now confronts the WHOLE identity the module
+#       declares -- balance == Reserve + WorkPool + AvailPool (RunEpoch states it; only SECURITY
+#       leaves the module) -- instead of the Reserve counter alone. A genesis declaring pools that
+#       nothing backs used to load cleanly and fail at the first work or availability payment.
+#       SecurityPool is excluded on purpose: those coins are sent to fee_collector, and counting
+#       them would refuse a correct genesis. Both halves are covered and red under mutation
+#       (genesis_reserve_backing_test.go::TestGenesisRefuseDesPoolsNonCouverts and
+#       ::TestGenesisAccepteUnSecurityPoolSorti). This is a LOAD-TIME refusal, not a state
+#       transition: it cannot fork a running chain, but it can refuse a genesis that used to load.
+#   5 = job expiry no longer reads a bare key prefix as SERVICE. `CreateCommit` checks that the signer
+#       is the operator OF THE MINER IT NAMES, never that this miner was ASSIGNED to the job, so any
+#       registered miner could anchor `<jobId>__<itsOwnId>` on somebody else's open job. The expiry
+#       walked that prefix bare, read one key as "served", and returned: the assigned committee never
+#       settled (it never answered), the client was never refunded, and the escrow stayed unreachable
+#       for good. One registration plus one gas fee froze any open job's fee, repeatably. The walk now
+#       counts only commits from miners the draw actually assigned (`assignedCommittee`), and a job
+#       that IS served but not yet settled is RESCHEDULED instead of dropped out of the queue -- a
+#       committee that answers and then never settles must keep an appointment that can reclaim the
+#       escrow. An underivable committee (deferred reveal pending, unreadable pool) is an UNKNOWN, so
+#       it reschedules too: on a criterion that decides where the money goes, no default is supplied.
+#       Covered by `job_expiry_test.go::TestExpiryACommitOUTSIDETheCommitteeDoesNotCountAsServed`, red under
+#       mutation (filter forced to accept every key) with "\"open\" does not contain \"expired\"".
+#       ⚠️ CONSENSUS-BREAKING: EndBlock takes different state transitions. Both validators must be
+#       upgraded TOGETHER; one node alone on this epoch forks at the first job that expires.
+#   4 = MEASURED, not assumed. A node built from this tree, replaying the live chain (height 23272,
+#       app_version v0.1.2-612-g9607402-dirty) from its own served genesis, diverges within the first
+#       blocks: "wrong Block.Header.AppHash. Expected A110C59002C450908852B68A12E2867307F4DA367AE9DFD
+#       69D59C24426444A43, got 0176C0B0DDF4E50AF4CB336C288BC8756A2592D2DD8DC7BD2CCFF94CA269AE9D".
+#       That divergence IS the reason this number moves: the epoch is not a changelog, it is the
+#       assertion that the previous state cannot be carried over -- and here it is a measurement.
+#       What changed: escrow expiry (the dead commit guard, and paying a job whose escrow was already
+#       returned is now refused); the reveal and job-expiry EndBlocker walks became ranged and capped,
+#       with the beacon-freeze deferral consuming its own orphans; frozenPoolAnchor applied at BOTH
+#       call sites (genesis import and OpenJob) so a miner registering in the opening block is outside
+#       the pool the job freezes, and the floor guard now counts at that anchor with the pool's OWN
+#       predicate; OpenJob enforces JobId uniqueness and appoints nobody at fee 0; Params.Validate
+#       refuses verification_mode=1 with committee_reveal_delay=0; emission InitGenesis refuses a
+#       Reserve counter the module account does not back (DENDRA_ALLOW_UNBACKED_RESERVE=1 downgrades
+#       that refusal to a warning for someone JOINING an already-unbacked network -- it reads only,
+#       writes no state, so it cannot itself change what the chain agrees on); modelregistry
+#       InitGenesis calls genState.Validate().
+#   1 = anchored committee + 2/3 quorum + commitRange (genesis 965d5d7c...).
+#   3 = miner_id DERIVED from the signer address and enforced in CreateMiner (ADR-039), and
+#       committee_reveal_delay actually transmitted to the chain container. Both are genesis-level:
+#       an existing chain cannot adopt either without a fresh genesis.
+#   2 = C1..M8, double slash k=3, ADR-034 partition (audits_opened counter, +adjudicated marker,
+#       audit_distinct_voters, vitality windows moved into params, assigned-committee and
+#       audit-deferred queries, extended genesis); vindication at the RELATIVE bar and sub-quorum
+#       => DEFERRAL (end of clawback-on-silence), the AdjudicateDispute twin closed,
+#       audit_voters/audit_max_operator_votes, HeldSince and the held-summary query,
+#       genesis held_since_elapsed.

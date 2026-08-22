@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Dendra Wallet</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e8eaed; --muted:#9aa2b1; --accent:#4f7cff; --accent2:#2b8a3e;
+    --danger:#e5484d; --warn:#e8890c; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:760px;margin:0 auto;padding:24px 18px 60px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+  .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4f7cff,#2b8a3e);display:grid;place-items:center;font-weight:800;color:#fff}
+  h1{font-size:20px;margin:0;font-weight:700}
+  .net{margin-left:auto;font-size:12px;color:var(--muted)}
+  /* This page is linked directly from the README and from the launch announcement, so a reader can
+     land on it first: it carries links to the rest of the site itself, rather than leaving the
+     browser's Back button as the only way out. The list omits the wallet, because a page does not
+     link to itself.
+     These five links navigate AWAY from a page that can have a recovery phrase on screen. What that
+     costs, and what pays for it, is at the `pagehide`/`pageshow` handlers below. */
+  a.logo{text-decoration:none}
+  .sitenav{display:flex;flex-wrap:wrap;gap:16px;margin:12px 0 0;font-size:13px}
+  .sitenav a{color:var(--muted);text-decoration:none}
+  .sitenav a:hover{color:var(--text);text-decoration:underline}
+  .notice{background:var(--panel2);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:#f0c48a;margin:12px 0 0}
+  .seedwarn{color:var(--warn);font-size:12.5px;margin:0 0 8px}
+  .banner{background:#2a1f14;border:1px solid #5a3d16;color:#f0c48a;border-radius:10px;padding:9px 12px;font-size:12.5px;margin:14px 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .card h2{font-size:14px;margin:0 0 12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 5px}
+  input,textarea,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:10px 12px;font:inherit;font-size:14px}
+  textarea{resize:vertical;min-height:64px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:0}
+  button{cursor:pointer;border:0;border-radius:9px;padding:10px 14px;font:inherit;font-weight:600;font-size:14px;background:var(--accent);color:#fff}
+  button.sec{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .addr{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all}
+  .bal{font-size:30px;font-weight:800;margin:4px 0}
+  .bal small{font-size:15px;color:var(--muted);font-weight:600}
+  .muted{color:var(--muted)}
+  .hidden{display:none}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;max-width:90%;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  .toast.ok{border-color:var(--accent2)} .toast.err{border-color:var(--danger)}
+  .mnem{background:var(--panel2);border:1px dashed var(--warn);border-radius:10px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.9;word-spacing:6px}
+  .k{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .k:last-child{border:0}
+  .small{font-size:12px}
+  footer{color:var(--muted);font-size:12px;text-align:center;margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="../index.html" aria-label="Dendra home">D</a>
+    <h1>Dendra Wallet</h1>
+    <span class="net" id="netLabel">testnet</span>
+  </header>
+  <nav class="sitenav" aria-label="Dendra">
+    <a href="../index.html">Home</a>
+    <a href="../docs/index.html">Docs</a>
+    <a href="../litepaper/index.html">Litepaper</a>
+    <a href="../network/index.html">Explorer</a>
+    <a href="../chat/index.html">Chat</a>
+  </nav>
+
+  <div class="banner">
+    <b>Testnet wallet.</b> $DNDR is a utility token with <b>no monetary value</b>, and it is never sold.
+    This is a public research testnet: <b>the chain can be reset, and a reset erases every balance</b>,
+    including yours. Keys live in this browser tab only. <b>Create a fresh wallet here — never import a
+    recovery phrase you use anywhere else</b>, even one that is empty today: an address you reuse
+    elsewhere can receive real funds tomorrow.
+  </div>
+
+  <!-- NETWORK -->
+  <div class="card">
+    <h2>Network</h2>
+    <div class="row">
+      <div>
+        <label>RPC endpoint (Tendermint :26657)</label>
+        <input id="rpc" value="https://api.dendranetwork.com/rpc"/>
+      </div>
+      <div>
+        <label>REST endpoint (:1317)</label>
+        <input id="rest" value="https://api.dendranetwork.com/rest"/>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:0 0 auto"><label>&nbsp;</label><button class="sec" id="btnPing">Test connection</button></div>
+      <div><label>Status</label><div class="addr small" id="netStatus">not connected</div></div>
+    </div>
+  </div>
+
+  <!-- CONNECT -->
+  <div class="card" id="connectCard">
+    <h2>Open a wallet</h2>
+    <div class="row">
+      <button id="btnCreate">Create new wallet</button>
+      <button class="sec" id="btnImportToggle">Import mnemonic</button>
+    </div>
+    <div id="importBox" class="hidden">
+      <label>24-word mnemonic</label>
+      <!-- A spell checker uploads what is typed here to a remote service, and an autofill store
+           keeps it after the tab is closed: both must be off on the one field that holds a seed. -->
+      <textarea id="mnemonicIn" spellcheck="false" autocomplete="off" autocorrect="off"
+                autocapitalize="off" placeholder="word1 word2 ... word24"></textarea>
+      <div style="margin-top:8px"><button id="btnImport">Import</button></div>
+    </div>
+    <div id="createBox" class="hidden">
+      <label>Your new mnemonic — write it down, it is the ONLY way to restore this wallet</label>
+      <!-- The rule is stated BEFORE it applies, not after it has bitten: the wipe below is bound to
+           leaving the page, and a reader who follows one of the links at the top has to know that
+           beforehand. Switching to another window does NOT clear it — that is how one writes a
+           phrase down. -->
+      <div class="seedwarn">Leaving this page clears these words. Write them down first — following
+        one of the links above, or the Back button, empties this box. Nothing is lost if it happens:
+        no wallet has been opened from these words yet, so a new phrase is one click away.</div>
+      <div class="mnem" id="mnemonicOut"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="sec" id="btnCopyMnem">Copy</button>
+        <button id="btnConfirmCreate">I saved it — open wallet</button>
+      </div>
+    </div>
+    <!-- Outside the two boxes on purpose: the wipe hides them, so a message placed inside would be
+         hidden by the very event it exists to explain. -->
+    <div id="seedGone" class="notice hidden">This page was left and came back, so the phrase it was
+      showing has been cleared. No wallet was opened from it — click “Create new wallet” for a new
+      one, or import the words you wrote down.</div>
+  </div>
+
+  <!-- ACCOUNT -->
+  <div class="card hidden" id="accountCard">
+    <h2>Account</h2>
+    <label>Address</label>
+    <div class="addr" id="address">—</div>
+    <div class="row" style="margin-top:8px">
+      <button class="sec" id="btnCopyAddr">Copy address</button>
+      <button class="ghost" id="btnRefresh">Refresh balance</button>
+      <button class="ghost" id="btnLock">Lock</button>
+    </div>
+    <div style="margin-top:18px">
+      <label>Balance</label>
+      <!-- Before the first query nothing has been measured: the placeholder must not read as a zero balance. -->
+      <div class="bal"><span id="balDNDR">?</span> <small>DNDR</small></div>
+      <div class="muted small mono" id="balMicro">? udndr</div>
+    </div>
+  </div>
+
+  <!-- FAUCET -->
+  <div class="card hidden" id="faucetCard">
+    <h2>Get testnet DNDR</h2>
+    <p class="muted small" style="margin:0 0 10px">
+      A new wallet holds nothing. Testnet $DNDR is handed out by a public faucet — <b>these tokens have
+      no monetary value</b>, they are not sold, and the network is resettable.
+    </p>
+    <div class="k"><span class="muted">Faucet</span><span class="mono" id="faucetUrl">http://api.dendranetwork.com:4500</span></div>
+    <div class="k"><span class="muted">Per request</span><span class="mono">10 DNDR · 1 per address per 24 h</span></div>
+    <p class="muted small" style="margin:12px 0 0">
+      The faucet is proof-of-work gated (anti-Sybil), so it is called from a terminal rather than from
+      this page. Ask it for its current difficulty, mine the nonce, then post your address:
+    </p>
+    <div class="addr small" style="margin-top:8px;white-space:pre-wrap">curl -s http://api.dendranetwork.com:4500/
+python3 - &lt;&lt;'EOF'
+import hashlib, itertools, json, urllib.request
+ADDR = "dendra1..."          # your address, copied above
+BITS = 20                    # pow_bits, as reported by the line above
+for n in itertools.count():
+    h = hashlib.sha256(("%s:%d" % (ADDR, n)).encode()).digest()
+    if int.from_bytes(h, "big") &gt;&gt; (256 - BITS) == 0:
+        break
+req = urllib.request.Request("http://api.dendranetwork.com:4500/",
+    json.dumps({"address": ADDR, "pow": str(n)}).encode(),
+    {"Content-Type": "application/json"})
+print(urllib.request.urlopen(req).read().decode())
+EOF</div>
+    <p class="muted small" style="margin:10px 0 0">
+      The faucet is served over plain HTTP: nothing secret travels there (a public address and a nonce),
+      but the reply is not authenticated — confirm the credit against your balance above, which is read
+      from the chain.
+    </p>
+  </div>
+
+  <!-- SEND -->
+  <div class="card hidden" id="sendCard">
+    <h2>Send DNDR</h2>
+    <label>Recipient address (dendra1…)</label>
+    <input id="to" class="mono" placeholder="dendra1..."/>
+    <div class="row" style="margin-top:8px">
+      <div><label>Amount (DNDR)</label><input id="amount" inputmode="decimal" placeholder="0.0"/></div>
+      <div><label>Memo (optional)</label><input id="memo" placeholder=""/></div>
+    </div>
+    <div style="margin-top:12px"><button id="btnSend">Send</button></div>
+    <div class="muted small" id="sendInfo" style="margin-top:8px"></div>
+  </div>
+
+  <!-- DENDRA (read-only network view) -->
+  <div class="card hidden" id="dendraCard">
+    <h2>Network activity</h2>
+    <div class="k"><span class="muted">Total supply</span><span class="mono" id="supply">—</span></div>
+    <div class="k"><span class="muted">Registered miners</span><span class="mono" id="miners">—</span></div>
+    <div class="k"><span class="muted">Verification mode</span><span class="mono" id="vmode">—</span></div>
+    <div style="margin-top:10px"><button class="ghost" id="btnNet">Refresh network</button></div>
+  </div>
+
+  <footer>
+    Dendra Wallet · testnet · open-source. Your keys never leave this browser tab.
+  </footer>
+</div>
+
+<script type="module">
+// CosmJS is served from this site, never from a third-party CDN. This page is where a recovery
+// phrase is typed, and a dynamic `import()` accepts no `integrity` attribute — a CDN able to serve
+// different bytes on any load would run them next to the seed, unchecked. The bundle in `vendor/` is
+// self-contained (no remote import survives inside it) and is produced by `wallet/build-vendor.sh`
+// from a committed lockfile, so its SHA-256 is reproducible by a third party.
+// The import stays dynamic so a load failure shows an explicit banner rather than a silently broken
+// page; top-level await holds the handlers below until the library is ready.
+let DirectSecp256k1HdWallet, SigningStargateClient, StargateClient, GasPrice;
+try {
+  ({ DirectSecp256k1HdWallet, SigningStargateClient, StargateClient, GasPrice } =
+    await import("./vendor/cosmjs-0.39.0.js"));
+} catch (e) {
+  const detail = (e && e.message) || e;
+  const banner = document.createElement("div");
+  banner.style.cssText = "background:#7f1d1d;color:#fff;padding:14px 16px;margin:0 0 16px;border-radius:10px;font-size:14px;line-height:1.45";
+  banner.textContent = "Failed to load the wallet crypto library (vendor/cosmjs-0.39.0.js). Serve this page over HTTP rather than opening the file directly, and check that vendor/ was deployed alongside it. Details: " + detail;
+  (document.querySelector(".wrap") || document.body).prepend(banner);
+  const st = document.getElementById("netStatus"); if (st) st.textContent = "library not loaded";
+  throw e;
+}
+
+const CFG = { chainId:"dendra", prefix:"dendra", denom:"udndr", display:"DNDR", decimals:6, gasPrice:"0udndr" };
+const $ = id => document.getElementById(id);
+let wallet=null, address=null, signer=null;
+
+// THE ZERO RULE. proto3 omits a field that holds its zero value, so in the chain's JSON "field
+// absent" and "field at zero" are the same bytes. Two consequences, applied everywhere below:
+//   · reading defaults to the ZERO OF THE TYPE (uint→0, repeated→[]) — an absent field is a known
+//     fact, not a missing one: a wallet holding nothing must read 0, never an error;
+//   · a FAILED query gets a DISTINCT sentinel — "not measurable" is not "measured zero". Showing
+//     0 for an unreachable endpoint invents a measurement the page never made.
+// The sentinel is never mixed into arithmetic: it only ever reaches textContent.
+const UNKNOWN = "?";
+const zero = (v, d) => (v === undefined || v === null ? d : v);
+// A non-2xx answer is a failure, not an empty result. Without this the REST gateway's JSON error
+// body parses cleanly and every field reads as absent — i.e. as zero.
+async function getJSON(url){
+  const r = await fetch(url, {cache:"no-store"});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+
+function toast(msg, kind=""){ const t=document.createElement("div"); t.className="toast "+kind; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3800); }
+const toDisplay = micro => (Number(zero(micro,0))/10**CFG.decimals).toLocaleString(undefined,{maximumFractionDigits:6});
+const toMicro   = d => String(Math.round(Number(d)*10**CFG.decimals));
+
+$("btnImportToggle").onclick = ()=>{ $("importBox").classList.toggle("hidden"); $("createBox").classList.add("hidden"); };
+$("btnCreate").onclick = async ()=>{
+  const w = await DirectSecp256k1HdWallet.generate(24, { prefix:CFG.prefix });
+  $("mnemonicOut").textContent = w.mnemonic;
+  $("createBox").classList.remove("hidden"); $("importBox").classList.add("hidden");
+  $("seedGone").classList.add("hidden");
+  window.__pendingMnemonic = w.mnemonic;
+};
+// A COPY THAT WAS REFUSED MUST NOT LOOK LIKE A COPY THAT WORKED.
+// `writeText` returns a PROMISE and it rejects for ordinary reasons: no permission, an insecure
+// context, a document that is not focused. Announcing success without waiting for it told the user
+// their phrase was safely in the clipboard when it was nowhere — and a phrase believed saved is a
+// phrase not written down.
+// The success message also names the clipboard, because it is the ONE place this page cannot clear
+// (see `wipeSeedUI`): the user has to know the phrase left the page in order to deal with it.
+$("btnCopyMnem").onclick = async ()=>{
+  try {
+    await navigator.clipboard.writeText($("mnemonicOut").textContent);
+    toast("Mnemonic copied — it is now in your system clipboard, which this page cannot clear","ok");
+  } catch (e) {
+    toast("Copy REFUSED by the browser — nothing was copied. Write the 24 words down by hand.","err");
+  }
+};
+$("btnConfirmCreate").onclick = ()=>{
+  const m = window.__pendingMnemonic;
+  // The phrase does not outlive the page it was shown on, so the button that consumes it can find
+  // nothing to consume. Naming the next gesture beats handing the user the library's complaint
+  // about a mnemonic that is not a string.
+  if(!m) return toast("No phrase on this page any more — click “Create new wallet” for a new one","err");
+  openWallet(m);
+};
+$("btnImport").onclick = ()=>{ const m=$("mnemonicIn").value.trim(); if(m.split(/\s+/).length<12) return toast("Invalid mnemonic","err"); openWallet(m); };
+
+// The seed exists in three places THIS FUNCTION CAN REACH: the box that shows a freshly generated
+// phrase, the textarea where an existing one is typed, and the global that carries it from "Create"
+// to "open wallet". `hidden` is a CSS class — what a hidden card still holds is one class toggle
+// away from being on screen again, so leaving the screen must EMPTY these three, not just hide them.
+//
+// ⚠️ AND THERE IS A FOURTH THAT IT CANNOT REACH: the SYSTEM CLIPBOARD, as soon as the user presses
+// Copy. No page can clear it, no navigation ends it, and it survives this wallet being closed. It is
+// not listed here to be wiped — it cannot be — but so that this comment stops reading as an
+// exhaustive inventory. What the code can do about it is tell the user, which the Copy handler now
+// does; the rest belongs to the person holding the machine.
+function wipeSeedUI(){
+  $("mnemonicOut").textContent = "";
+  $("mnemonicIn").value = "";
+  $("createBox").classList.add("hidden");
+  $("importBox").classList.add("hidden");
+  window.__pendingMnemonic = null;
+}
+
+// LEAVING THE PAGE IS PART OF THE THREAT MODEL, AND `Lock` CANNOT COVER IT. Five links at the top
+// navigate away from a page that can have 24 words on screen, and a browser does not throw a
+// navigated-away page away: it parks it in the back/forward cache, ALIVE. The Back button then
+// restores the same document — same DOM, same globals — so the phrase and `__pendingMnemonic` come
+// back exactly as they were. `Lock` is no answer there: it lives inside `accountCard`, which is
+// hidden at precisely the moment a phrase is displayed, so the one wipe gesture is unreachable when
+// it would be needed. The wipe therefore belongs to the EXIT itself, not to a button.
+//
+// THE ARBITRAGE, because it cuts both ways: erasing a phrase its owner has not written down yet is
+// a damage of its own — a mnemonic is the only way back into a wallet. It stays a SMALL damage
+// here, and the reason is specific to this moment: while these words are on screen, no wallet has
+// been opened from them — `openWallet` has not run, no address is derived, nothing can have been
+// received. Losing them costs one click on "Create new wallet". That is what makes erasing on exit
+// the cheap side of the trade, and it is why the page says so above the words rather than after.
+//
+// `visibilitychange` is deliberately NOT used. It fires on switching to another window or tab —
+// which is HOW one writes a phrase down, into a notes app or a password manager. Wiping there would
+// destroy the phrase during the very gesture the page asks for. Exit, not inattention.
+let seedWasOnScreen = false;
+const seedOnScreen = ()=> !!(window.__pendingMnemonic || $("mnemonicOut").textContent.trim() || $("mnemonicIn").value.trim());
+// `pagehide` fires on both endings — a real unload and an entry into the back/forward cache — so it
+// is the one event that covers leaving by a link, by Back, or by closing the tab. `beforeunload` and
+// `unload` are not used and must not be: they are also what makes a browser refuse to cache the page
+// at all, which would hide the restore path instead of handling it.
+addEventListener("pagehide", ()=>{ seedWasOnScreen = seedOnScreen(); wipeSeedUI(); });
+addEventListener("pageshow", (e)=>{
+  // The wipe is UNCONDITIONAL. A restore is exactly the case that must not hinge on a flag being
+  // present and read correctly, and on a first load the three places are already empty, so calling
+  // it costs nothing. `event.persisted` — true only when the document comes back from the
+  // back/forward cache — is read for the MESSAGE alone, so the page never claims to have cleared a
+  // phrase that was not there.
+  const hadSeed = seedWasOnScreen; seedWasOnScreen = false;
+  wipeSeedUI();
+  if(hadSeed && e && e.persisted === true) $("seedGone").classList.remove("hidden");
+});
+
+async function openWallet(mnemonic){
+  try{
+    signer = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, { prefix:CFG.prefix });
+    const [acct] = await signer.getAccounts();
+    address = acct.address;
+    $("address").textContent = address;
+    $("connectCard").classList.add("hidden");
+    ["accountCard","faucetCard","sendCard","dendraCard"].forEach(id=>$(id).classList.remove("hidden"));
+    wipeSeedUI();
+    toast("Wallet opened","ok");
+    refreshBalance(); refreshNetwork();
+  }catch(e){
+    // The typed phrase is deliberately kept here: a refused import is usually one wrong word, and
+    // clearing 24 words would force a full retype. It stays on the connect screen the user is still
+    // looking at, and only there — `Lock` empties it, and so does leaving the page.
+    toast("Open failed: "+(e.message||e),"err");
+  }finally{
+    // A generated phrase must not outlive the attempt that consumed it, successful or not.
+    window.__pendingMnemonic = null;
+  }
+}
+// `Lock` is what one clicks when walking away from the machine. CONSTRAINT it has to meet: it hides
+// the account AND leaves the seed places empty. It calls `wipeSeedUI`, which empties the three of
+// them, and it does not reveal `createBox` or `importBox` — the connect card comes back with its
+// buttons only. A `Lock` that puts 24 words back on screen contradicts the word on the button.
+$("btnLock").onclick = ()=>{
+  signer=null; address=null;
+  ["accountCard","faucetCard","sendCard","dendraCard"].forEach(id=>$(id).classList.add("hidden"));
+  $("connectCard").classList.remove("hidden");
+  wipeSeedUI();
+  $("address").textContent = "—";
+  $("balDNDR").textContent = UNKNOWN; $("balMicro").textContent = UNKNOWN+" udndr";
+  $("sendInfo").textContent = "";
+  toast("Locked");
+};
+$("btnCopyAddr").onclick = async ()=>{
+  // Same shape as the mnemonic copy: an unawaited promise reports a success the browser never gave.
+  try { await navigator.clipboard.writeText(address); toast("Address copied","ok"); }
+  catch (e) { toast("Copy REFUSED by the browser — select the address and copy it by hand.","err"); }
+};
+
+async function refreshBalance(){
+  if(!address) return;
+  try{
+    const c = await StargateClient.connect($("rpc").value.trim());
+    const b = await c.getBalance(address, CFG.denom); c.disconnect?.();
+    // A fresh wallet holds nothing and the chain omits the amount: that is a measured zero.
+    const micro = zero(b && b.amount, "0");
+    $("balDNDR").textContent = toDisplay(micro); $("balMicro").textContent = micro+" udndr";
+  }catch(e){
+    // The previous balance must not survive a failed refresh: a stale number reads as current.
+    $("balDNDR").textContent = UNKNOWN; $("balMicro").textContent = UNKNOWN+" udndr";
+    toast("Balance unknown (RPC/CORS?): "+(e.message||e),"err");
+  }
+}
+$("btnRefresh").onclick = refreshBalance;
+
+// Written as text nodes, never as markup: the transaction hash and the chain's `rawLog` come from
+// whatever endpoint the user pointed at, and `innerHTML` would let that endpoint place an element —
+// with an inline handler — on the page that holds the seed.
+function setSendInfo(text, mono){
+  const el = $("sendInfo"); el.textContent = text;
+  if(mono){ const s=document.createElement("span"); s.className="mono"; s.textContent=mono; el.append(" ", s); }
+}
+// The chain-id is part of what gets SIGNED. Taken from the endpoint, a swapped URL makes this page
+// produce a valid signature for another chain — one the user never agreed to give. It is checked
+// before sendTokens because that is the last moment where nothing has been signed yet. A chain-id
+// that cannot be read is not a match: on the signing path, unknown is refused.
+async function assertChainId(client){
+  let got;
+  try{ got = await client.getChainId(); }
+  catch(e){ throw new Error("chain-id unreadable from this endpoint ("+((e && e.message)||e)+")"); }
+  if(got !== CFG.chainId) throw new Error("endpoint announces chain-id \""+got+"\"; this page signs only for \""+CFG.chainId+"\"");
+  return got;
+}
+// A broadcast that returns is not a transfer that happened. The node refusing the transaction
+// outright throws; a transaction INCLUDED IN A BLOCK and then failed comes back normally, carrying
+// a non-zero `code`. Announcing "Sent" without reading `code` asserts a success on a criterion
+// nobody evaluated — on the one action that moves money.
+// proto3 omits a zero, so an absent `code` would read as the successful one. "Success" is precisely
+// the answer that must never come from a default: a `code` that is not a readable number yields the
+// UNKNOWN sentinel instead — not a claim of failure, a refusal to claim anything — and sends the
+// reader to the two places where the outcome can actually be read (the balance, and the chain).
+function reportSend(res){
+  const hash = (res && res.transactionHash) || "";
+  const code = res && res.code;
+  if(typeof code !== "number" || !hash){
+    setSendInfo("Result "+UNKNOWN+" — the node answered but the outcome could not be read. Refresh the balance before sending again.", hash || null);
+    toast("Transfer result "+UNKNOWN,"err");
+    return;
+  }
+  if(code === 0){
+    setSendInfo("Included in a block, code 0 — tx", hash);
+    toast("Transaction included (code 0)","ok");
+  }else{
+    const rawLog = (res && res.rawLog) || "";
+    setSendInfo("FAILED ON CHAIN — code "+code+(rawLog ? " — "+rawLog : "")+" — tx", hash);
+    toast("Transaction failed on chain (code "+code+")","err");
+  }
+  refreshBalance();
+}
+$("btnSend").onclick = async ()=>{
+  const to=$("to").value.trim(), amt=$("amount").value.trim(), memo=$("memo").value;
+  if(!to.startsWith("dendra1")) return toast("Recipient must start with dendra1","err");
+  if(!(Number(amt)>0)) return toast("Enter an amount","err");
+  $("btnSend").disabled=true; $("sendInfo").textContent="Signing and broadcasting…";
+  try{
+    const client = await SigningStargateClient.connectWithSigner($("rpc").value.trim(), signer, { gasPrice: GasPrice.fromString(CFG.gasPrice) });
+    await assertChainId(client);
+    const res = await client.sendTokens(address, to, [{denom:CFG.denom, amount:toMicro(amt)}], "auto", memo);
+    reportSend(res);
+  }catch(e){
+    // An address that has never received anything has no account object on chain, so signing fails
+    // before it can even read a sequence number. The library says so in its own terms ("query
+    // sequence"), which reads as a fault; it is the ordinary state of every wallet created here.
+    // Naming the cause and pointing at the faucet turns a dead end into the next step.
+    var raw = (e && e.message) || String(e);
+    var unfunded = /does not exist on chain/i.test(raw);
+    // The toast is gone in four seconds. A refusal has to stay on screen, or a transfer that never
+    // left looks exactly like one that was never attempted.
+    setSendInfo(unfunded
+      ? "Not sent: this address holds nothing yet, so there is no account on chain to send from. Fund it from the faucet above, then try again."
+      : "Not sent: "+raw);
+    toast(unfunded ? "Nothing to send yet — fund this address from the faucet above" : "Send failed", "err");
+  }
+  $("btnSend").disabled=false;
+};
+
+async function refreshNetwork(){
+  const rest = $("rest").value.trim().replace(/\/$/,"");
+  try{
+    const s = await getJSON(rest+"/cosmos/bank/v1beta1/supply/by_denom?denom="+CFG.denom);
+    $("supply").textContent = toDisplay(zero(s.amount && s.amount.amount, "0"))+" DNDR";
+  }catch{ $("supply").textContent = UNKNOWN; }
+  try{
+    const m = await getJSON(rest+"/dendra/jobs/v1/miner");
+    // An empty `repeated` is omitted: no registered miner is a count of 0, not an absence of answer.
+    $("miners").textContent = zero(m.miner, []).length;
+  }catch{ $("miners").textContent = UNKNOWN; }
+  try{
+    const p = await getJSON(rest+"/dendra/jobs/v1/params");
+    const par = zero(p.params, {});
+    // Mode 0 and quorum 0 are legal values; rendering them as the failure sentinel would report an
+    // unreachable chain while the chain answered.
+    $("vmode").textContent = "mode "+zero(par.verification_mode, 0)+" · quorum "+zero(par.audit_min_quorum, 0);
+  }catch{ $("vmode").textContent = UNKNOWN; }
+}
+$("btnNet").onclick = refreshNetwork;
+
+$("btnPing").onclick = async ()=>{
+  $("netStatus").textContent="connecting…";
+  try{
+    const c=await StargateClient.connect($("rpc").value.trim());
+    const h=await c.getHeight();
+    // Reachable is not the same as being the chain this page signs for. An endpoint that answers
+    // with another chain-id is reported here, before anyone opens a wallet against it.
+    let id; try{ id = await c.getChainId(); }catch(e){ id = UNKNOWN; }
+    c.disconnect?.();
+    $("netStatus").textContent = (id === CFG.chainId)
+      ? "OK · chain-id "+id+" · height "+h
+      : "WRONG CHAIN · endpoint announces \""+id+"\", this page signs only for \""+CFG.chainId+"\" · height "+h;
+  }
+  catch(e){ $("netStatus").textContent="unreachable — check RPC URL + node CORS"; }
+};
+</script>
+</body>
+</html>
