@@ -1,0 +1,18 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/jobs/types";
+
+// Commit is a miner's binding commitment to the work it performed on a job: the hash of the prompt
+// it was given and the hash of the result it produced, published before either is revealed.
+message Commit {
+  string job_id = 1;
+  string prompt_commit = 2;
+  string result_commit = 3;
+  string kind = 4;
+  string creator = 5;
+  string model_id = 6; // Model served. Must be registered and active when enforce_model_registry is on.
+  // Hash of the weights actually served, checked against the model registry entry. The model id
+  // alone is a label a miner picks; this is what ties the answer to a specific set of weights.
+  string weights_hash = 7;
+}

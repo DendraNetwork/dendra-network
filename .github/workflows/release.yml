@@ -1,0 +1,237 @@
+name: release
+
+# Publishes ready-to-run `dendrad` binaries when a version tag is pushed, so that operating a node
+# does not require installing a Go toolchain and compiling the chain first.
+#
+#   Trigger:  git tag v0.1.0 && git push origin v0.1.0
+#   Result:   a GitHub Release carrying one archive per platform, a SHA256SUMS file for the archives,
+#             and a SHA256SUMS.binaries file for the uncompressed binaries.
+#
+# The binaries are reproducible: a third party who checks out the same tag and runs the documented
+# command obtains a binary with the same SHA-256. That property is what makes a published checksum
+# worth anything -- a hash nobody can recompute proves only that some machine once produced some file.
+# It is held by four decisions, none of which is optional:
+#
+#   * the Go toolchain is pinned by the `toolchain` directive in go.mod, not by the runner image;
+#   * `-trimpath` removes the build directory from the binary;
+#   * the version and commit are injected through `-ldflags -X`, never by editing a tracked file, so
+#     the source tree that is built is exactly the tree the tag points at;
+#   * `-buildvcs=false` keeps the VCS stamp out of the binary, which would otherwise embed the state
+#     of the builder's checkout and differ for anyone building from a source archive.
+#
+# CGO_ENABLED=0 yields a static binary (goleveldb, no RocksDB) that runs without system dependencies.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # No binary is published from a tree that does not build, vet, test and regenerate cleanly. A
+  # release is the one artifact users cannot inspect before trusting, so the gate belongs here and
+  # not only on the branch.
+  verify:
+    name: Verify the tagged tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: chain/go.mod
+          cache-dependency-path: chain/go.sum
+
+      - name: go build
+        working-directory: chain
+        run: go build ./...
+
+      - name: go vet
+        working-directory: chain
+        run: go vet ./...
+
+      - name: go test
+        working-directory: chain
+        run: go test ./...
+
+      - name: Generated protobuf code matches the .proto sources
+        working-directory: chain
+        run: make proto-check
+
+  build:
+    name: Build dendrad (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false          # one platform failing must not hide the result for the others
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The version comes from the `toolchain` directive in go.mod. Naming a version here as well
+          # would create a second source of truth that silently drifts from the one the Makefile and
+          # every contributor use.
+          go-version-file: chain/go.mod
+          cache-dependency-path: chain/go.sum
+
+      - name: Build
+        working-directory: chain
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ldflags="-X github.com/cosmos/cosmos-sdk/version.Name=dendra"
+          ldflags="$ldflags -X github.com/cosmos/cosmos-sdk/version.AppName=dendrad"
+          ldflags="$ldflags -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION}"
+          ldflags="$ldflags -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT}"
+          mkdir -p "${GITHUB_WORKSPACE}/dist"
+          go build -trimpath -buildvcs=false -ldflags "$ldflags" \
+            -o "${GITHUB_WORKSPACE}/dist/dendrad" ./cmd/dendrad
+
+      - name: Archive and checksum
+        working-directory: dist
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          base="dendrad_${VERSION}_${GOOS}_${GOARCH}"
+
+          # Checksum of the uncompressed binary. This is the figure a rebuilder compares against:
+          # it depends only on the compiler and the source, never on how the archive was packed.
+          sha256sum dendrad | sed "s|dendrad$|${base}/dendrad|" > "${base}.bin.sha256"
+
+          # The archive is packed deterministically as well: fixed entry order, fixed timestamps
+          # taken from the tagged commit, no owner names, and gzip without its own timestamp field.
+          # Left to their defaults, tar and gzip embed the build time and make every rebuild differ.
+          epoch="$(git -C "${GITHUB_WORKSPACE}" log -1 --format=%ct)"
+          mkdir -p "${base}"
+          cp dendrad "${base}/dendrad"
+          for extra in LICENSE NOTICE; do
+            if [ -f "${GITHUB_WORKSPACE}/${extra}" ]; then
+              cp "${GITHUB_WORKSPACE}/${extra}" "${base}/${extra}"
+            fi
+          done
+          tar --sort=name --format=gnu --mtime="@${epoch}" \
+              --owner=0 --group=0 --numeric-owner \
+              -cf - "${base}" | gzip -n -9 > "${base}.tar.gz"
+          sha256sum "${base}.tar.gz" > "${base}.tar.gz.sha256"
+          rm -rf "${base}" dendrad
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error      # an empty upload must not travel on as a success
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write                   # narrowed to the single job that actually writes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Assemble the checksum files
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          cat *.tar.gz.sha256   | sort -k2 > SHA256SUMS
+          cat *.bin.sha256      | sort -k2 > SHA256SUMS.binaries
+          rm -f *.tar.gz.sha256 *.bin.sha256
+
+          # A release whose asset list is empty would otherwise be published as a success.
+          count="$(find . -name '*.tar.gz' | wc -l)"
+          [ "$count" -gt 0 ] || { echo "no archive was produced"; exit 1; }
+          echo "archives: $count"
+          cat SHA256SUMS SHA256SUMS.binaries
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ github.ref_name }}
+          CLONE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          ## dendrad ${VERSION}
+
+          Static \`dendrad\` binaries. No Go toolchain is needed to run a node.
+
+          \`\`\`
+          tar xzf dendrad_${VERSION}_linux_amd64.tar.gz
+          ./dendrad_${VERSION}_linux_amd64/dendrad version
+          \`\`\`
+
+          ### Verify what you downloaded
+
+          \`\`\`
+          sha256sum -c SHA256SUMS --ignore-missing
+          \`\`\`
+
+          ### Rebuild it yourself and compare
+
+          \`SHA256SUMS.binaries\` lists the SHA-256 of each **uncompressed** binary. Those are
+          reproducible: the toolchain is pinned by the \`toolchain\` directive in \`chain/go.mod\`,
+          the build path is stripped, the VCS stamp is disabled, and the version string is injected
+          rather than written into a file. Building the same tag on any machine yields the same bytes.
+
+          \`\`\`
+          git clone ${CLONE_URL} dendra
+          cd dendra && git checkout ${VERSION}
+          cd chain
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false \\
+            -ldflags "-X github.com/cosmos/cosmos-sdk/version.Name=dendra \\
+                      -X github.com/cosmos/cosmos-sdk/version.AppName=dendrad \\
+                      -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION} \\
+                      -X github.com/cosmos/cosmos-sdk/version.Commit=\$(git rev-parse HEAD)" \\
+            -o dendrad ./cmd/dendrad
+          sha256sum dendrad
+          \`\`\`
+
+          Compare that value with the matching \`linux_amd64\` line of \`SHA256SUMS.binaries\`. A
+          mismatch means the published binary was not built from this tag, and should be reported
+          through \`SECURITY.md\` rather than used.
+
+          The archive checksums in \`SHA256SUMS\` cover download integrity; the binary checksums are
+          the ones to use for reproducibility, since they do not depend on how the archive was packed.
+          EOF
+          cat notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "${VERSION}" \
+            --title "dendrad ${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag \
+            dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.binaries

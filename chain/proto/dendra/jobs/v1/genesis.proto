@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "dendra/jobs/v1/beacon.proto";
+import "dendra/jobs/v1/commit.proto";
+import "dendra/jobs/v1/job.proto";
+import "dendra/jobs/v1/miner.proto";
+import "dendra/jobs/v1/params.proto";
+import "dendra/jobs/v1/pools.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/jobs/types";
+
+// GenesisState defines the jobs module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  repeated Miner miner_map = 2 [(gogoproto.nullable) = false];
+  repeated Job job_map = 3 [(gogoproto.nullable) = false];
+  Pools pools = 4;
+  repeated Commit commit_map = 5 [(gogoproto.nullable) = false];
+  repeated Beacon beacon_map = 6 [(gogoproto.nullable) = false];
+
+  // --- TRANSPORTED STATE (fields 7 and above) ------------------------------------------------
+  // The module holds 23 collections. Fields 1 to 6 cover six of them, so an export limited to that
+  // range dropped the other seventeen SILENTLY — no error, just state that ceased to exist.
+  //
+  // FIVE of them must NOT be transported: four caches keyed by HEIGHT (the decentralized seed
+  // tables and the block-hash cache) and `available`, keyed by EPOCH. After a genesis, neither a
+  // height nor an epoch index designates anything, so carrying them across would restore entries
+  // that point nowhere.
+  //
+  // The remaining TWELVE carry VALUE, DEADLINES or AUTHORIZATION. Each field below states what
+  // losing it would actually cost.
+
+  // VALUE. Fee and burn HELD per job. The coins stay in the module account either way, but without
+  // these two tables nothing records who they belong to or when to release them: orphaned funds.
+  repeated HeldAmount held_fee = 7 [(gogoproto.nullable) = false];
+  repeated HeldAmount held_burn = 8 [(gogoproto.nullable) = false];
+
+  // DEADLINES. Each entry is an appointment the end blocker must keep. Losing one does not lose
+  // coins directly, which is worse: the affected jobs never resolve, so their escrow and their held
+  // fee stay locked and no error is ever raised.
+  repeated PendingEntry pending_reveal = 9 [(gogoproto.nullable) = false];
+  repeated PendingEntry pending_audit = 10 [(gogoproto.nullable) = false];
+  repeated PendingEntry pending_audit_resolve = 11 [(gogoproto.nullable) = false];
+  repeated PendingEntry pending_appeal_resolve = 12 [(gogoproto.nullable) = false];
+
+  // AUTHORIZATION. The anchored audit committee (ADR-032, ADR-033): who is entitled to vote. Absent,
+  // the tally fails closed — safe, but every dispute in flight becomes inert.
+  repeated StringEntry audit_committee = 13 [(gogoproto.nullable) = false];
+  // Validator VRF keys. Without them the seed has no contributors, so grinding resistance is
+  // INACTIVE until every validator re-anchors its key. The logs show it; the state does not.
+  repeated StringEntry validator_vrf_pubkey = 14 [(gogoproto.nullable) = false];
+
+  // ANTI-ABUSE. Sybil probation counters. Reset to zero, an already-known miner restarts with a
+  // fresh counter and buys back the full-audit period it had already served.
+  repeated Uint64Entry miner_optimistic_count = 15 [(gogoproto.nullable) = false];
+  // Sliding window of availability failures. Losing it erases the history that arms the slash.
+  repeated Uint64Entry avail_fail_count = 16 [(gogoproto.nullable) = false];
+  repeated Uint64Entry avail_fail_window_start = 17 [(gogoproto.nullable) = false];
+  // Current availability challenge. Proven presences are per-epoch and are not transported: see the
+  // reserved field below.
+  string avail_challenge = 18;
+  // 19 was `available`. REMOVED: its key is an EPOCH, purged at every boundary, and an epoch index
+  // designates nothing after a genesis. The number stays reserved so it is never reused.
+  reserved 19;
+
+  // Jobs SELECTED by the audit lottery and waiting to be opened (ADR-034). Losing the marker on
+  // migration would replay the lottery on the retry, which reopens the evasion it exists to close:
+  // a miner that gets a second draw can have an audit cancelled by chance.
+  repeated string audit_selected = 20;
+  // Held-fee releases that are DUE after a failed transfer, retried once per epoch by the end
+  // blocker. Losing the queue would make "a held fee stays claimable" false again after a
+  // migration: held_fee itself travels in field 7, but nothing would retry it.
+  repeated string pending_held_release = 21;
+  // MONOTONIC count of audits opened — the INDEPENDENT side of the partition check (ADR-034).
+  // Losing it on migration would break the sum permanently: the classes are counted from the
+  // transported job states while this counter would restart at zero.
+  uint64 audits_opened = 22;
+  // DATE of each held fee, transported as an AGE in elapsed blocks. Same relative rule as
+  // PendingEntry: an absolute height designates nothing after a genesis, so the import re-anchors
+  // `since = max(initial_height - value, 0)`. The clamp always keeps the debt OLD, never the
+  // reverse — the oldest-held-fee alarm must survive a migration rather than reset to zero.
+  repeated Uint64Entry held_since_elapsed = 23 [(gogoproto.nullable) = false];
+  // ANCHORING DATE of each seated committee, transported as an AGE under the same relative rule and
+  // the same keep-it-old clamp as held_since_elapsed. A juror's seat lock must survive the
+  // migration without rejuvenating, or the oldest-lock age would fall silent exactly when it
+  // matters. The committee itself travels in audit_committee; its date travels here.
+  repeated Uint64Entry committee_since_elapsed = 24 [(gogoproto.nullable) = false];
+  // EXPIRY OF AN UNSERVED JOB. Travels like the other deadlines, as an age re-anchored on import: an
+  // absolute height means nothing after a genesis. Losing these entries does not lose coins directly,
+  // which is worse -- the client's escrow of every job whose miner never answered would stay locked
+  // for ever, with nothing to raise.
+  repeated PendingEntry pending_job_expiry = 25 [(gogoproto.nullable) = false];
+
+  // work_committee — the ANCHORED work committee of each job (ADR-045, entry 12), ordered member ids
+  // joined by ',', element 0 being the primary. It travels for the same reason the audit committee
+  // does: a committee that did not survive the export would be RE-DERIVED on import, hence from the
+  // stake of that moment -- which is the defect the anchoring exists to close, back on the first
+  // restart. Distinct from audit_committee on purpose: three consumers read every audit_committee
+  // entry as a JURY SEAT.
+  repeated StringEntry work_committee = 26 [(gogoproto.nullable) = false];
+}
+
+// HeldAmount is an amount withheld by the module on behalf of one job.
+message HeldAmount {
+  string job_id = 1;
+  uint64 amount = 2;
+}
+
+// PendingEntry is one appointment from a key set indexed by (height, identifier) pairs.
+//
+// `blocks_remaining` is RELATIVE, not an absolute height. Height-indexed collections are not
+// transported at all because heights restart at genesis, and the same reasoning applies here: a
+// deadline exported as an absolute height would fire thousands of blocks late on a chain restarted
+// at 1, and would NEVER fire if the restart height is already past it, because the end blocker
+// matches the exact height. What travels is therefore the TIME LEFT TO WAIT, which the import
+// re-anchors on the height the chain resumes from.
+message PendingEntry {
+  int64 blocks_remaining = 1;
+  string id = 2;
+}
+
+// StringEntry is one entry of a string-keyed, string-valued map.
+message StringEntry {
+  string key = 1;
+  string value = 2;
+}
+
+// Uint64Entry is one entry of a string-keyed, uint64-valued map.
+message Uint64Entry {
+  string key = 1;
+  uint64 value = 2;
+}

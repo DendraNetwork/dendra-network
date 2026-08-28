@@ -1,0 +1,401 @@
+# Dendra ($DNDR) — persistent TESTNET. One command: docker compose up -d
+#  - chain: native `dendrad start`, frozen genesis + stable keys in the persistent `dendra-home` volume.
+#  - faucet/gateway: share `dendra-home` and sign by key name (bob / gw), no hardcoded keys.
+#  - miners are EXTERNAL (PC + GPU). Local miners and monitoring are optional profiles.
+name: dendra
+
+x-svc-env: &svc-env
+  DENDRA_RELAY: "http://relay:8645"
+  DENDRA_NODE: "tcp://chain:26657"
+  DENDRA_CHAIN_ID: "dendra"
+  OLLAMA_ENDPOINT: "http://ollama:11434"
+
+services:
+  chain:
+    # BUILD ARGS — the rule stated forty lines below applies one line above it too. That comment says
+    # "Compose transmits ONLY what it NAMES" about the runtime environment; it is just as true of
+    # build arguments. `docker/Dockerfile.chain` stamps the binary through -ldflags (`version.Version`,
+    # `version.Commit`), so the machinery is already in place; a `build:` that names no args simply
+    # never delivers the values, and the ARG defaults (`dev` / `unknown`) win every single build.
+    # That symptom reads as "the ldflags are missing" while the ldflags are intact — the transmission
+    # is what is absent, and it is named here, not in the Dockerfile.
+    #
+    # WHY IT MATTERS BEYOND TIDINESS: ADR-039 anchors a snapshot on blocks + state + the EXACT binary.
+    # A binary that answers `version=dev, git_commit=unknown` identifies nothing, so the third leg of
+    # the triplet names no source. The values are computed by the launch script, which is the only
+    # place a repository exists — the rsync to the VPS excludes `.git`.
+    # The `:-` defaults keep a bare `docker compose build` working for anyone who just clones and runs.
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.chain
+      args:
+        VERSION: "${DENDRA_BUILD_VERSION:-dev}"
+        COMMIT: "${DENDRA_BUILD_COMMIT:-unknown}"
+    image: dendra/chain:latest
+    restart: always
+    # CONSENSUS-BREAKING SURFACE. Everything below is read by docker/entrypoint-chain.sh on the
+    # FIRST BOOT ONLY, to build the genesis. Compose transmits ONLY what it NAMES: a variable set in
+    # the .env but absent from this block never reaches the container, the entrypoint falls back to
+    # its own default, and the genesis freezes that default forever. There is no way back — the chain
+    # would have to be destroyed and rebuilt. Every variable entrypoint-chain.sh reads is therefore
+    # named here, and dendra/onchain-staging/dendra_env_transmis_garde.sh fails if one is missing.
+    #
+    # FORM: "${VAR:-}" (empty pass-through), NOT a default copied from the entrypoint. Copying the
+    # default would put the same number in two files, and the day they diverge the compose wins
+    # silently. Empty is safe because every read in the entrypoint uses `${VAR:-fallback}`, which
+    # treats empty exactly like unset. The single place a default lives stays the entrypoint.
+    environment:
+      DENDRA_CHAIN_ID: "dendra"
+      DENDRA_HOME: "/root/.dendra"                              # pinned, NOT operator-tunable: it must match the volume mount below, and a home elsewhere would put the chain state outside the volume
+      DENDRA_MONIKER: "${DENDRA_MONIKER:-}"                     # validator moniker written at init
+      DENDRA_VRF_KEY_FILE: "/root/.dendra/config/vrf_key"       # read by the BINARY, not by the entrypoint (chain/app/vote_extensions.go:81)
+      # ---- genesis: the audit committee and its seed (ADR-032) ----
+      DENDRA_COMMITTEE_SEED_SOURCE: "${DENDRA_COMMITTEE_SEED_SOURCE:-}"   # 1 (default) = decentralised VRF seed only; 0 = legacy seed the block proposer knows before proposing
+      # The entrypoint READS this one and validates it. Declared here because a variable an entrypoint
+      # reads and compose never passes takes its default in silence — the genesis then ships a value
+      # nobody chose, and nothing rings. The transmission guard fires on exactly this case.
+      # The two anti-grinding knobs are NOT interchangeable: seed_source closes the block proposer,
+      # reveal_delay closes the job creator. Setting one is not setting the other.
+      DENDRA_COMMITTEE_REVEAL_DELAY: "${DENDRA_COMMITTEE_REVEAL_DELAY:-}"  # blocks between anchoring a committee and revealing it; 0 lets a job creator read the seed at its own height
+      DENDRA_MIN_VRF_CONTRIB: "${DENDRA_MIN_VRF_CONTRIB:-}"     # floor of distinct VRF contributors below which the seed is refused (default 2)
+      DENDRA_VE_ENABLE_HEIGHT: "${DENDRA_VE_ENABLE_HEIGHT:-}"   # height at which ABCI++ vote extensions turn on (default 20); the seed cannot exist before it
+      DENDRA_AUDIT_SAMPLE_BPS: "${DENDRA_AUDIT_SAMPLE_BPS:-}"   # audited share (default 5000 = 50% testnet; 10000 = 100% demo)
+      DENDRA_AUDIT_RESOLVE_TIMEOUT: "${DENDRA_AUDIT_RESOLVE_TIMEOUT:-}"   # blocks before an audit resolves (default 120; raise it for slower multi-model judges)
+      DENDRA_GENESIS_MODELS_ACTIVE: "${DENDRA_GENESIS_MODELS_ACTIVE:-}"   # 0 (default) = models seeded at genesis stay INACTIVE while they carry no weights_sha256, so the only way to activate one is RegisterModel, which requires that digest; 1 restores the old behaviour and leaves model_id unbound to any artifact
+      DENDRA_DISPUTE_BOND: "${DENDRA_DISPUTE_BOND:-}"           # anti-grief bond (default 50000 udndr); left at the proto zero, disputing is FREE and the confiscation confiscates nothing
+      # These two were READ by entrypoint-chain.sh and never TRANSMITTED, which is the worst shape a
+      # missing variable can take: the entrypoint defaults (49500 and 1000000) happen to equal what the
+      # running chain already carries, so the omission is invisible until the day someone sets one of
+      # them in the .env -- a genesis day -- and the value is silently dropped while the launcher
+      # reports success. Nothing reads them after genesis, so nothing would ever contradict it.
+      DENDRA_JUROR_FRESHNESS_BLOCKS: "${DENDRA_JUROR_FRESHNESS_BLOCKS:-}"  # ADR-034 juror freshness window (default 49500 blocks)
+      DENDRA_MIN_STAKE: "${DENDRA_MIN_STAKE:-}"                 # miner bond floor (default 1000000 udndr); the entrypoint REFUSES 0, since the ADR-042 assignment ceiling is scaled by it
+      # ---- genesis: cold pockets. Supplying an address means the key never touches this host ----
+      # These two exist ONLY at genesis. Missing here, a cold address set in the .env is silently
+      # ignored and 38% of the supply is minted onto keys stored in plaintext on a rented machine.
+      DENDRA_RESERVE_ADDR: "${DENDRA_RESERVE_ADDR:-}"
+      DENDRA_EQUIPE_ADDR: "${DENDRA_EQUIPE_ADDR:-}"
+      # ---- ADR-022 availability slashing. DORMANT unless DENDRA_AVAIL_SLASH=1 ----
+      # The six tuning values are transmitted even while dormant: arming without them would apply the
+      # entrypoint defaults, i.e. a calibration nobody chose, on the boot that freezes it.
+      DENDRA_AVAIL_SLASH: "${DENDRA_AVAIL_SLASH:-}"            # 1 arms availability slashing; entrypoint default 0 = dormant, keep it there until proven live
+      DENDRA_AVAIL_EPOCH_BLOCKS: "${DENDRA_AVAIL_EPOCH_BLOCKS:-}"
+      DENDRA_AVAIL_DEADLINE_BLOCKS: "${DENDRA_AVAIL_DEADLINE_BLOCKS:-}"
+      DENDRA_AVAIL_FAIL_K: "${DENDRA_AVAIL_FAIL_K:-}"
+      DENDRA_AVAIL_FAIL_WINDOW: "${DENDRA_AVAIL_FAIL_WINDOW:-}"
+      DENDRA_AVAIL_SLASH_BPS: "${DENDRA_AVAIL_SLASH_BPS:-}"
+      DENDRA_AVAIL_SLASH_MAX: "${DENDRA_AVAIL_SLASH_MAX:-}"
+      # ---- consensus downtime (x/slashing). Compose transmits ONLY what it NAMES: a value set in the
+      # .env and absent from this block reaches nothing, and the operator gets no warning. The five are
+      # named here for that reason alone; leaving them empty keeps the entrypoint's own defaults, which
+      # ARE the policy — AT GENESIS. These parameters are GOVERNED afterwards: a passed proposal moves
+      # them on the live chain and nothing in this file follows, so no number written here describes
+      # what the chain currently applies. The downtime budget is DERIVED, never copied: the SDK jails
+      # past signed_blocks_window - round(signed_blocks_window x min_signed_per_window) missed blocks,
+      # and the live values come from `dendrad query slashing params -o json` — deploy/validator_health.sh
+      # reads them, derives that budget in BLOCKS and reports how much of it is already spent.
+      # The entrypoint's defaults are deliberately wider than the stock Cosmos SDK calibration, which
+      # jails and slashes on a short absence, automatically and with no warning, while the node keeps
+      # running and looks healthy: that is how both non-datacentre validators fell, and it is the whole
+      # reason these five variables exist.
+      DENDRA_SLASH_SIGNED_BLOCKS_WINDOW: "${DENDRA_SLASH_SIGNED_BLOCKS_WINDOW:-}"
+      DENDRA_SLASH_MIN_SIGNED_BPS: "${DENDRA_SLASH_MIN_SIGNED_BPS:-}"
+      DENDRA_SLASH_DOWNTIME_JAIL_SECONDS: "${DENDRA_SLASH_DOWNTIME_JAIL_SECONDS:-}"
+      DENDRA_SLASH_DOWNTIME_BPS: "${DENDRA_SLASH_DOWNTIME_BPS:-}"
+      DENDRA_SLASH_DOUBLE_SIGN_BPS: "${DENDRA_SLASH_DOUBLE_SIGN_BPS:-}"
+      # Cold address for the team pocket. DENDRA_EQUIPE_ADDR is the deprecated spelling the entrypoint
+      # still reads as a fallback; only the English name is transmitted here, so a genesis booted from
+      # the old name now warns instead of silently generating a fresh key.
+      DENDRA_TEAM_ADDR: "${DENDRA_TEAM_ADDR:-}"
+    volumes: ["dendra-home:/root/.dendra"]
+    # ⛔ THE RPC BIND IS A KNOB HERE TOO, AND ITS DEFAULT CHANGES NOTHING.
+    # `26657` is what `DENDRA_NODE` serves to joiners, so it stays open on an operator host — the
+    # default below is exactly the previous behaviour, byte for byte. What was missing is not a
+    # different binding, it is the ABILITY TO SAY SO: `deploy/validator_health.sh` reports an RPC
+    # published on every interface, and it cannot tell a deliberate operator endpoint from a node
+    # that exposed itself by accident unless the choice is written down. Hardcoding the port left
+    # this host permanently in the "accidental" column, which is how a warning becomes noise and
+    # then becomes invisible.
+    # ⛔ 1317 AND 9090 GET THE SAME TREATMENT, WITH VERY DIFFERENT COSTS — read them before closing.
+    #
+    # 1317 (REST) IS LOAD-BEARING FOR JOINERS, and closing it breaks the documented path:
+    #   · `deploy/join.sh` derives its REST endpoint from DENDRA_NODE as `http://<host>:1317`;
+    #   · `deploy/launch/cheat_public.sh` and `judges5_public.sh` read `min_stake` there and REFUSE to
+    #     guess when it does not answer -- by design, so a wrong stake never registers nobody quietly;
+    #   · `deploy/README.md` sends operators to it for the two counters that say what the network is
+    #     short of. Close it and that instruction stops working for everyone but you.
+    #
+    # 9090 (gRPC) HAS NO KNOWN PUBLIC CONSUMER in this repository: the chain serves it, and nothing
+    # published reads it (the only other `:9090` is Prometheus, a different service, reached inside the
+    # compose network). It is therefore the cheapest port to close on a validator, and the one where
+    # "open by default" buys the least.
+    #
+    # All three default to today's behaviour, byte for byte. What changes is that the choice can be
+    # SAID -- `deploy/validator_health.sh` reports each of them, and a declared exposure reads
+    # differently from an accidental one.
+    ports:
+      - "${DENDRA_RPC_BIND:-0.0.0.0}:26657:26657"
+      - "26656:26656"
+      - "${DENDRA_API_BIND:-0.0.0.0}:1317:1317"
+      - "${DENDRA_GRPC_BIND:-0.0.0.0}:9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:26657/status >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+  faucet:
+    image: dendra/services:latest
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["faucet"]
+    volumes: ["dendra-home:/root/.dendra"]
+    ports: ["4500:4500"]
+    # Tunable anti-abuse (defaults = production: 5 drips/IP/day, 24h cooldown). For a closed test (many judges +
+    # a cheater from one IP) relax it: DENDRA_FAUCET_IP_DAILY=100 DENDRA_FAUCET_ADDR_COOLDOWN=0 docker compose up -d faucet.
+    # PoW anti-Sybil is wired but DORMANT by default (0). For a public launch, set DENDRA_FAUCET_POW_BITS=20 in the .env.
+    # DENDRA_PUBLIC is passed to the service so the daemon's fail-closed guard (PUBLIC=1 without PoW = refuse to boot)
+    # actually takes effect under Docker.
+    environment: { <<: *svc-env, DENDRA_HOME: "/root/.dendra", DENDRA_FAUCET_FROM: "bob", DENDRA_FAUCET_AMOUNT: "10000000", DENDRA_FAUCET_PORT: "4500", DENDRA_FAUCET_IP_DAILY: "${DENDRA_FAUCET_IP_DAILY:-5}", DENDRA_FAUCET_ADDR_COOLDOWN: "${DENDRA_FAUCET_ADDR_COOLDOWN:-86400}", DENDRA_FAUCET_DAILY_CAP: "${DENDRA_FAUCET_DAILY_CAP:-2000}", DENDRA_FAUCET_POW_BITS: "${DENDRA_FAUCET_POW_BITS:-0}", DENDRA_PUBLIC: "${DENDRA_PUBLIC:-0}" }
+
+  relay:
+    build: { context: ., dockerfile: docker/Dockerfile.services }
+    image: dendra/services:latest
+    depends_on: [chain]
+    restart: always
+    command: ["relay"]
+    ports: ["8645:8645"]
+    # With DENDRA_PUBLIC=1 (the public-launch .env) the relay REFUSES to boot without a strong DENDRA_RELAY_TOKEN
+    # (fail-closed, mirroring the gateway). A closed stack (PUBLIC=0) is unchanged.
+    # REVEAL PERSISTENCE — the name `relay-store` is the one the VPS already mounts (real volume:
+    # `dendra_relay-store`). A different name (`dendra-relay-store`) would send the next recreation
+    # onto a BRAND-NEW, therefore EMPTY, volume and lose every reveal in flight — exactly the failure
+    # this line exists to prevent. The volume NAME is the persistence contract.
+    # The volume AND the matching DENDRA_RELAY_STORE variable are BOTH required: with either missing,
+    # persistence exists on no deployment made from this repository, and `up -d --force-recreate relay`
+    # loses every reveal in flight, hence every audit that depends on them. Persistence is observable
+    # when it holds — a relay reloads its stored records after a recreation.
+    # ⚠️ A running host that already carries the volume proves nothing about the KIT: state added by
+    # hand on a server is invisible here, so what has to be checked is the divergence between the two,
+    # never the presence of the line on the machine that happens to work.
+    volumes: ["relay-store:/data/relay-store"]
+    # SIGNED-WRITE POLICY — named here for the same reason as everything else in this block, and the
+    # miner kit carries the identical trap for `DENDRA_SIGN_KEY`, which stays invisible to its
+    # container until its own compose file names it.
+    # Setting DENDRA_RELAY_SIGN in the .env without this key does NOTHING: the container reads
+    # the compiled default `off`, `/stats` answers `mode: off`, and an operator who ran the command
+    # believes the guard is armed. That is worse than not arming it — a disarmed guard that reports its
+    # own name reads exactly like an armed one.
+    #
+    # ⛔ THE DEFAULT IS `observe`, NOT `off`, AND THAT IS THE POINT.
+    # Since the relay applies its policy PER ROUTE, a miner's write is accepted on a valid signature
+    # INSTEAD of the shared token — that is what makes joining self-service. But `_signature_ok()`
+    # returns the reason `"off"` when signing is disabled, never `"signed"`, so on a relay left at
+    # `off` a perfectly signed deposit still falls through to the token check and takes a 401.
+    # Shipping `off` would therefore ship a wall behind the published promise: the operator reads "no
+    # token needed", installs, registers on-chain, TAKES A JURY SEAT, and only discovers the refusal at
+    # the first deposit — late, and expensively.
+    # `observe` verifies signatures and accepts unsigned writes as well, so it excludes nobody: it is
+    # the only value that makes the published promise true without breaking an older client. `enforce`
+    # stays opt-in, because the gateway does not sign yet and would be locked out by it.
+    # ⛔ DENDRA_RELAY_REGISTRY IS NOT AN OPTION OF THE SIGNATURE, IT IS ITS SUBJECT. `relay.py`
+    # says so where it reads the variable: with no registry, a signature is VERIFIED but attributed to
+    # NOBODY — the relay knows that a key signed, never WHICH miner, which is precisely what a shared
+    # token could not express and the whole reason the signature exists. `enforce` refuses to start
+    # without it. The deployment already served it while this file did not carry it, and the
+    # deployment-parity gate was drowning that gap in 344 false positives caused by line endings. The
+    # obvious remedy — rsync this file onto the server — would therefore have ERASED it.
+    environment: { DENDRA_RELAY_HOST: "0.0.0.0", DENDRA_PUBLIC: "${DENDRA_PUBLIC:-0}", DENDRA_RELAY_TOKEN: "${DENDRA_RELAY_TOKEN:-}", DENDRA_RELAY_TOKEN_PREV: "${DENDRA_RELAY_TOKEN_PREV:-}", DENDRA_RELAY_STORE: "/data/relay-store", DENDRA_RELAY_SIGN: "${DENDRA_RELAY_SIGN:-observe}", DENDRA_RELAY_REGISTRY: "${DENDRA_RELAY_REGISTRY:-http://chain:1317}" }
+
+  gateway:
+    image: dendra/services:latest
+    depends_on:
+      chain: { condition: service_healthy }
+      relay: { condition: service_started }
+      faucet: { condition: service_started }
+    restart: always
+    command: ["gateway"]
+    # `gw-quota` is SEPARATE from `dendra-home` on purpose. The free-tier counters bound a tap that
+    # spends the project's own subsidy, and they exist to stop a RESTART from reopening it. Kept in the
+    # chain home they would be erased by every genesis reset and by `down -v` — the two gestures this
+    # project performs most — so the guard would lapse exactly when the stack is most disturbed.
+    volumes: ["dendra-home:/root/.dendra", "gw-quota:/data"]
+    # 8651 IS LOOPBACK-ONLY, AND NOT PUBLISHED. Caddy and open-webui reach the gateway over the DOCKER
+    # NETWORK (`gateway:8651`), never through this port, so closing it cuts nothing off. It must stay
+    # closed as long as DENDRA_TRUST_PROXY=1: otherwise a client hits the gateway OUTSIDE Caddy and
+    # forges its own X-Forwarded-For at will — a partial fix that is WORSE than no fix at all.
+    # THESE TWO LINES (this port and TRUST_PROXY below) GO TOGETHER. Never one without the other.
+    ports: ["127.0.0.1:8651:8651"]
+    # WHAT THIS DOES NOT CLOSE — read before believing per-device quotas hold everywhere. TRUST_PROXY
+    # fixes per-device accounting on the `/demo/*` path (Caddy -> gateway). It does NOT fix the public
+    # chat, which goes through open-webui: open-webui is not a reverse proxy, it issues its own
+    # server-to-server requests and propagates NO X-Forwarded-For. For all that traffic `_client_ip()`
+    # falls back to the open-webui container IP — a constant — so a SINGLE global bucket is all that
+    # remains on the path users actually take. The GLOBAL bucket (FREE_TOK_DAY), checked FIRST, still
+    # caps everyone regardless of any per-device split. Closing this properly is a product decision
+    # (authenticate the public chat, or revise the quota policy), not one more variable.
+    # Moderation: a deterministic CPU regex floor (always on, in-process, incl. the CSAM pattern) is the ONLY
+    # filter armed by default. The optional LLM classifier stage (llama-guard) stays OFF because
+    # DENDRA_GUARD_MODEL is empty, and this kit deliberately leaves it empty (a CPU VPS is too slow for it).
+    # Not a legal-compliance guarantee.
+    #
+    # THE FOUR FILTER VARIABLES ARE NAMED BELOW, for the reason spelled out in the `chain` block: compose
+    # transmits ONLY what it NAMES. The gateway process reads DENDRA_GUARD_MODEL (content_filter.py:93),
+    # DENDRA_GUARD_FAILCLOSED (:97), DENDRA_SCREEN_OUTPUT (:111) and DENDRA_REQUIRE_FILTER
+    # (gateway.py:74). Unnamed here, each of them set in the .env stops at the host: the container keeps
+    # its compiled default, `/v1` answers exactly as before, and an operator who armed the classifier believes
+    # the gateway screens what it does not screen. That is the failure mode DENDRA_SIGN_KEY and
+    # DENDRA_RELAY_SIGN carry above — a guard that stays silent when disarmed reads like an armed one — and
+    # moderation is the surface where it is paid in illegal content served.
+    #
+    # FORM: empty pass-through, as in `chain`. The empty string is INERT for all four (modea/exposition.py:25
+    # groups it with 0/false/no/off), so naming them moves no default; it makes the operator's choice
+    # REACHABLE. The three guard knobs are named together because FAILCLOSED and SCREEN_OUTPUT only bite once
+    # GUARD_MODEL is set (content_filter.py:198,235): a classifier armed without its fail-closed lever lets a
+    # mute or erroring guard PASS, which is the one arrangement that looks stronger than regex alone and is not.
+    # DENDRA_RELAY_TOKEN: the gateway is a relay CLIENT (it POSTs sealed tasks). When the relay runs with
+    # auth ON (public launch), the gateway MUST send the token or the relay rejects its posts silently and
+    # no task ever reaches the miners. (Closed stack: relay auth OFF, so its absence is harmless there.)
+    environment: { <<: *svc-env, DENDRA_HOME: "/root/.dendra", DENDRA_GW_PORT: "8651", DENDRA_GW_HOST: "0.0.0.0", DENDRA_TRUST_PROXY: "1", DENDRA_COMMITTEE_K: "1", DENDRA_SUBSIDY_CLIENT: "gw", DENDRA_FREE_TIER: "1", DENDRA_QUOTA_FILE: "/data/quota.json", DENDRA_FAUCET: "http://faucet:4500", DENDRA_API_KEY: "${DENDRA_API_KEY:-}", DENDRA_RELAY_TOKEN: "${DENDRA_RELAY_TOKEN:-}", DENDRA_PUBLIC: "${DENDRA_PUBLIC:-0}", DENDRA_CORS_ORIGIN: "${DENDRA_CORS_ORIGIN:-}", DENDRA_GUARD_MODEL: "${DENDRA_GUARD_MODEL:-}", DENDRA_GUARD_FAILCLOSED: "${DENDRA_GUARD_FAILCLOSED:-}", DENDRA_SCREEN_OUTPUT: "${DENDRA_SCREEN_OUTPUT:-}", DENDRA_REQUIRE_FILTER: "${DENDRA_REQUIRE_FILTER:-}" }
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    depends_on: [gateway]
+    restart: always
+    environment:
+      OPENAI_API_BASE_URLS: "http://gateway:8651/v1"
+      OPENAI_API_KEYS: "${DENDRA_API_KEY:-dendra}"   # public exposure: set a real key via .env
+      ENABLE_OLLAMA_API: "False"
+      WEBUI_AUTH: "${WEBUI_AUTH:-False}"             # public exposure: WEBUI_AUTH=True (accounts) via .env
+      ENABLE_PERSISTENT_CONFIG: "False"
+      ENABLE_TITLE_GENERATION: "False"
+      WEBUI_NAME: "Dendra"
+      WEBUI_URL: "${WEBUI_URL:-http://localhost:8080}"   # public: https://chat.dendranetwork.com (set via .env)
+    volumes: ["open-webui:/app/backend/data"]
+    # Open WebUI — served at chat.dendranetwork.com by Caddy. Bound to loopback: a second, unauthenticated
+    # door to the same app on the public IP is a door nobody audits.
+    ports: ["127.0.0.1:8080:8080"]
+
+  # HTTPS reverse proxy (auto Let's Encrypt): api.dendranetwork.com -> gateway, chat.dendranetwork.com -> open-webui.
+  # Requires DNS-only A records (api. + chat.) -> VPS IP and ports 80/443 open. Config: docker/Caddyfile.
+  caddy:
+    image: caddy:2
+    restart: always
+    depends_on: [gateway, open-webui]
+    # Key injected server-side on the public /demo path (browser never sees it) — see docker/Caddyfile.
+    environment: { DENDRA_API_KEY: "${DENDRA_API_KEY:-}" }
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # ----- PUBLIC launch (profile: docker compose --profile public up -d) -----
+  # The Proof (:8090) = read-only verifiability feed (recent jobs / pools / VRF health — NO secrets);
+  # points (:8091) = provisional Season 0 leaderboard (stateless, recomputed from on-chain state).
+  proof:
+    image: dendra/services:latest
+    profiles: ["public"]
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["proof"]
+    environment: { <<: *svc-env, DENDRA_PROOF_HOST: "0.0.0.0", DENDRA_PROOF_PORT: "8090", DENDRA_PROOF_CORS: "${DENDRA_PROOF_CORS:-https://dendranetwork.com}" }
+    # The Proof — served at proof.dendranetwork.com by Caddy (with its CORS policy). Loopback only.
+    ports: ["127.0.0.1:8090:8090"]
+  points:
+    image: dendra/services:latest
+    profiles: ["public"]
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["points"]
+    environment: { <<: *svc-env, DENDRA_POINTS_HOST: "0.0.0.0", DENDRA_POINTS_PORT: "8091", DENDRA_POINTS_CORS: "${DENDRA_POINTS_CORS:-https://dendranetwork.com}", DENDRA_R2_EXCLUDE_ADDRS: "${DENDRA_R2_EXCLUDE_ADDRS:-}" }
+    # Points indexer — NO public surface consumes it and it has no auth. Loopback only.
+    ports: ["127.0.0.1:8091:8091"]
+  # Network capacity registry: hardware + served models, DECLARED by operators (inventory, NOT proof —
+  # a node can claim any GPU). Persisted on a volume: a registry that forgets on restart is a bug.
+  capacity:
+    image: dendra/services:latest
+    profiles: ["public"]
+    depends_on: { chain: { condition: service_healthy } }
+    restart: always
+    command: ["capacity"]
+    environment: { <<: *svc-env, DENDRA_CAPACITY_HOST: "0.0.0.0", DENDRA_CAPACITY_PORT: "8092", DENDRA_CAPACITY_CORS: "${DENDRA_CAPACITY_CORS:-*}", DENDRA_CAPACITY_DB: "/data/capacity.json" }
+    volumes: ["capacity-db:/data"]
+    # Capacity registry — served at api.dendranetwork.com/capacity by Caddy. Loopback only.
+    ports: ["127.0.0.1:8092:8092"]
+
+  # ----- monitoring (optional: docker compose --profile monitoring up -d) -----
+  exporter:
+    image: dendra/services:latest
+    profiles: ["monitoring"]
+    depends_on: { chain: { condition: service_healthy } }
+    command: ["exporter"]
+    environment: { <<: *svc-env, DENDRA_EXPORTER_PORT: "9101" }
+    ports: ["9101:9101"]
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["monitoring"]
+    depends_on: [exporter]
+    volumes:
+      - "./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "./docker/prometheus-rules.yml:/etc/prometheus/rules.yml:ro"
+    ports: ["127.0.0.1:9099:9090"]   # localhost only — internal metrics, reach via SSH tunnel (not public)
+  grafana:
+    image: grafana/grafana-oss:latest
+    profiles: ["monitoring"]
+    depends_on: [prometheus]
+    environment:
+      # Anonymous access is READ-ONLY (Viewer, not Admin). Monitoring is an opt-in profile and Grafana binds
+      # to localhost only — do NOT expose :3000 publicly; reach it over an SSH tunnel
+      # (ssh -L 3000:localhost:3000 user@host).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - "./docker/grafana-provisioning:/etc/grafana/provisioning:ro"
+      - "grafana-data:/var/lib/grafana"
+    ports: ["127.0.0.1:3000:3000"]
+
+  # ----- LOCAL miners (optional: docker compose --profile local up -d). On the VPS, miners are EXTERNAL. -----
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    volumes: ["ollama-models:/root/.ollama"]
+    ports: ["11434:11434"]
+  miner1:
+    image: dendra/services:latest
+    profiles: ["local"]
+    depends_on: { chain: { condition: service_healthy }, relay: { condition: service_started }, ollama: { condition: service_started } }
+    command: ["miner", "m1"]
+    # DENDRA_MINER_JUDGE=1 -> this miner ALSO judges audits (optimistic committee); DENDRA_JUDGE_ENDPOINT = the judge's
+    # Ollama (point it at a CPU for the MoE, freeing the GPU). DORMANT by default (0); arm it for audit/incentive.
+    # Benefit-of-the-doubt is ON by default (proven ambiguity -> vote "1", avoiding an unfair no-quorum penalty on an
+    # honest miner). Rollback: DENDRA_JUDGE_ABSTAIN_VOTE=0 in the .env.
+    # DENDRA_JUDGE_MODEL_OVERRIDE/_ID: a judge MUST carry its judge model on-chain (committee-model diversity =
+    # the C3 gate). Absent -> fallback to the default model, diluting the on-chain proxy.
+    # DENDRA_MINER_REVEAL / DENDRA_REVEAL_GRACE: the entrypoint READS both in its `miner)` role
+    # (entrypoint-services.sh, `REVEAL_ON=` and the `--reveal-grace` argument passed to judge_worker), so a
+    # service that does not NAME them hands over nothing: setting either one in the .env then changes
+    # nothing and reports nothing. REVEAL is what separates an OBLIGATION from a ROLE — a primary that does
+    # not reveal leaves its client's fee held forever — so it stays ON by the entrypoint default; naming it
+    # here is what makes the one legitimate override reachable, a CPU-only container that judges without
+    # mining and has nothing of its own to reveal. GRACE is the number of reveal-open attempts a juror makes
+    # before posting a 0 verdict (judge_worker.py:953); it only bites when DENDRA_MINER_JUDGE=1.
+    # Both are passed EMPTY on purpose, as the `chain` service does: the entrypoint owns the default value,
+    # and a default restated here would be a second value free to drift away from the first.
+    # DENDRA_RELAY_TOKEN: the miner is a relay CLIENT. When the relay runs with auth ON
+    # (DENDRA_PUBLIC=1), every request without `X-Dendra-Token` takes a 401 that relay_client swallows:
+    # the miner concludes "no jobs" and waits forever, registered on-chain and never served.
+    environment: { <<: *svc-env, FAUCET: "http://faucet:4500", BACKEND: "ollama", DENDRA_RELAY_TOKEN: "${DENDRA_RELAY_TOKEN:-}", DENDRA_MINER_JUDGE: "${DENDRA_MINER_JUDGE:-0}", DENDRA_JUDGE_ENDPOINT: "${DENDRA_JUDGE_ENDPOINT:-}", DENDRA_JUDGE_ABSTAIN_VOTE: "${DENDRA_JUDGE_ABSTAIN_VOTE:-1}", DENDRA_JUDGE_MODEL_OVERRIDE: "${DENDRA_JUDGE_MODEL_OVERRIDE:-}", DENDRA_JUDGE_MODEL_ID: "${DENDRA_JUDGE_MODEL_ID:-}", DENDRA_MINER_REVEAL: "${DENDRA_MINER_REVEAL:-}", DENDRA_REVEAL_GRACE: "${DENDRA_REVEAL_GRACE:-}" }
+
+volumes:
+  relay-store: {}
+  gw-quota: {}
+  dendra-home: {}
+  ollama-models: {}
+  grafana-data: {}
+  open-webui: {}
+  caddy-data: {}
+  caddy-config: {}
+  capacity-db: {}

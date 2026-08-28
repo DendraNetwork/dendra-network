@@ -1,0 +1,189 @@
+name: CI
+
+# Continuous integration for this repository. It names only paths that exist here: `chain/` (the
+# Cosmos SDK node), `services/` (the reference off-chain implementation) and `tokenomics/` (the
+# economic model, reached through the Python enumeration below).
+#
+# Every step is a gate, and three rules apply to all of them:
+#   * no `|| true`, no `continue-on-error`, no piping a command into another program -- each of
+#     those discards the exit code of the thing being tested;
+#   * a step whose inputs are missing fails; it does not skip. An absent test directory is a defect,
+#     not a reason to report success;
+#   * a step that could pass by examining nothing counts what it examined and fails on zero.
+#
+# Steps also carry an `if` condition naming the step they actually depend on, rather than the
+# implicit "every previous step succeeded". Without it a single failure skips the remainder of the
+# job, so one red result conceals every result after it.
+
+on:
+  # Every branch and every pull request. No branch list: such a list only covers the branches
+  # somebody remembered to add to it, and commits on any other branch reach the remote unexamined.
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # `github.event_name` is part of the key so that runs started differently on the same ref -- a
+  # push and a hand-launched run, for instance -- do not cancel one another. A cancelled run reports
+  # nothing at all: it is neither a pass nor a failure.
+  # Within one group cancellation is still wanted: a second push on the same branch supersedes the
+  # first, and the superseded run has nothing left to say about the tree.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  chain:
+    name: Chain build, vet and test (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The toolchain version is read from the module itself and pinned nowhere else.
+          # `chain/go.mod` carries a `toolchain` directive, so this job, a contributor's machine and
+          # the release build all compile with the same compiler.
+          go-version-file: chain/go.mod
+          cache-dependency-path: chain/go.sum
+
+      - name: go build
+        working-directory: chain
+        run: go build ./...
+
+      - name: go vet
+        if: ${{ !cancelled() }}
+        working-directory: chain
+        run: go vet ./...
+
+      - name: go test
+        if: ${{ !cancelled() }}
+        working-directory: chain
+        run: go test ./...
+
+  proto:
+    name: Generated protobuf code is reproducible
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: chain/go.mod
+          cache-dependency-path: chain/go.sum
+
+      # Regenerates the `.pb.go` and `.pb.gw.go` files from the `.proto` sources with the `buf`
+      # version pinned in the tool block of go.mod, and compares them byte for byte against what is
+      # committed. Drift between a schema and its generated code is invisible to the test suite,
+      # which compiles against the committed code and keeps passing while the schema says something
+      # else. The target fails if the comparison examined zero files, so a generator that produced
+      # nothing cannot report success.
+      - name: make proto-check
+        if: ${{ !cancelled() }}
+        working-directory: chain
+        run: make proto-check
+
+  services:
+    name: Services and tokenomics (syntax, lint, tests, benches)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        id: deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r services/requirements.txt
+          pip install prometheus_client pynacl pytest
+          # Pinned: an unpinned linter lets an upstream release change the verdict on an unchanged
+          # tree.
+          pip install ruff==0.16.0
+
+      # One list, built once, handed to both the compiler and the linter. Naming directories
+      # separately lets the two lists diverge, and a directory that is compiled but never linted
+      # looks checked without being checked.
+      - name: Enumerate tracked Python files
+        if: ${{ !cancelled() }}
+        id: pyfiles
+        run: |
+          set -euo pipefail
+          files="$(git ls-files '*.py' | grep -vE '(^|/)(\.venv|venv|\.pytest_cache|node_modules)/' || true)"
+          count="$(printf '%s\n' "$files" | grep -c . || true)"
+          # An empty list would let `xargs -r` succeed without examining anything.
+          [ "$count" -gt 0 ] || { echo "no tracked Python file was found"; exit 1; }
+          echo "found $count files"
+          printf '%s\n' "$files" > /tmp/pyfiles.txt
+
+      - name: Syntax check every tracked Python file
+        if: ${{ !cancelled() && steps.pyfiles.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          count="$(grep -c . /tmp/pyfiles.txt || true)"
+          [ "$count" -gt 0 ] || { echo "the file list is empty"; exit 1; }
+          echo "compiling $count files"
+          xargs -n 50 python -m py_compile < /tmp/pyfiles.txt
+
+      - name: Lint
+        if: ${{ !cancelled() && steps.pyfiles.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          # Defects, not style: undefined names (F82), broken comparisons such as `is` against a
+          # literal (F63), unreachable or malformed constructs (F7), syntax errors (E9). These are
+          # the faults `py_compile` cannot see -- a misspelled name compiles and fails at run time.
+          # The remaining default rules report stylistic findings, which say nothing about
+          # correctness and are deliberately not selected.
+          count="$(grep -c . /tmp/pyfiles.txt || true)"
+          [ "$count" -gt 0 ] || { echo "the file list is empty"; exit 1; }
+          echo "linting $count files"
+          xargs -n 200 ruff check --select E9,F63,F7,F82 --no-cache < /tmp/pyfiles.txt
+
+      - name: pytest
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        working-directory: services
+        run: |
+          set -euo pipefail
+          # An absent test directory is a defect, not a reason to report success.
+          test -d tests || { echo "services/tests is missing"; exit 1; }
+          # Scoped to `tests/`. Several `test_*.py` files at the root of `services/` are standalone
+          # measurement programs that call `sys.exit()` at import time; collecting them aborts the
+          # pytest run with an internal error instead of reporting a test result. The next step runs
+          # them as programs.
+          python -m pytest -q tests/
+
+      - name: Standalone benches at the root of services
+        # Independent of the pytest step above: being uncollectable by pytest is a reason to run
+        # these differently, not a reason to leave them run by nothing. Among them is the bench that
+        # asserts the relay's per-route access policy, on both sides -- what must open and what must
+        # stay shut.
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        working-directory: services
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          n=0
+          ko=0
+          for f in test_*.py; do
+            n=$((n + 1))
+            if timeout 300 python "$f" > "/tmp/bench-$f.log" 2>&1; then
+              echo "  ok   $f"
+            else
+              rc=$?
+              ko=$((ko + 1))
+              echo "  FAIL $f (exit $rc)"
+              tail -20 "/tmp/bench-$f.log" | sed 's/^/       /'
+            fi
+          done
+          # A loop over an empty list reports success having run nothing.
+          [ "$n" -gt 0 ] || { echo "no standalone bench found in services"; exit 1; }
+          echo "$n bench(es) run, $ko failed"
+          [ "$ko" -eq 0 ]
