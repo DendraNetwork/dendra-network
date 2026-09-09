@@ -1,0 +1,32 @@
+1
+# KIT VERSION — the operator-facing surface: what a joiner downloads and runs.
+#
+# WHY THIS IS NOT `CONSENSUS_EPOCH`, AND WHY THE TWO MUST NOT BE MERGED.
+# The epoch answers "does my binary take the same state transitions as this network?". It moves only
+# on a consensus-breaking change, a mismatch IS a fork, and `join.sh` therefore REFUSES to continue.
+# This number answers a different question: "is the code I run current?". A defect in a script an
+# operator runs breaks that operator and nobody else, so a mismatch here is a WARNING and never a
+# refusal — a kit one version behind still joins, it is simply told to update.
+#
+# Merging them would force the choice between two wrong behaviours: refusing a joiner over a script
+# fix, or staying silent about a broken one.
+#
+# WHAT A BUMP IS FOR. It exists because a shipped defect had no way to announce itself: the operator
+# ran code that could not do its job, everything looked healthy, and nothing anywhere said "update".
+# The epoch could not carry that signal, because nothing about consensus had changed.
+#
+# BUMP IT when a change alters what an operator RUNS or how they run it:
+#   · deploy/**                       — join.sh, hw_probe.sh, the node/miner kits, their compose files
+#   · a service an OPERATOR executes  — the miner daemon, the judge and reveal workers, capacity_sign
+#   · an image they build, or an environment variable they must now set
+#
+# DO NOT bump it for:
+#   · network-side services only we run (relay, capacity server, faucet, gateway)
+#   · documentation, the site, or internal tooling
+#
+# A number that moves for everything says nothing. If every change bumped it, an operator reading
+# "you are behind" would learn only that time has passed.
+#
+# HOW IT TRAVELS. The network publishes it in `network-info.txt`; `deploy/join.sh` compares that value
+# with line 1 of this file, exactly as it already does for the epoch. The published mirror also carries
+# it in its root `VERSION` file, so a clone can answer the question without contacting anyone.
