@@ -1,0 +1,49 @@
+# Dendra — alerting rules.
+#
+# WHY THIS FILE EXISTS AT ALL. Every metric this stack exports is read FROM the chain, so a chain that
+# STOPS producing does not make any of them go red: it makes them all stop changing. `dendra_block_height`
+# is a Gauge — a frozen height is still a perfectly good non-zero number — and `dendra_chain_up` stays at
+# 1 because the RPC keeps answering. A dashboard of levels therefore shows a healthy network for as long
+# as nobody notices the numbers have not moved. What separates "frozen" from "healthy" is a RATE, and a
+# rate is the one thing a gauge panel does not show.
+#
+# THIS IS NOT A THEORETICAL CASE ON THIS NETWORK. The voting power is split so that no single validator
+# reaches two thirds, which is what makes the second one actually sign — and the price is that stopping
+# EITHER validator stops block production for everyone. That is the failure this file exists to name.
+#
+# THE ZERO RULE APPLIES TO MONITORING TOO: a series that DISAPPEARS must not read as a series that is
+# fine. `increase()` over a missing series yields nothing at all, so the stall rule alone is silent
+# exactly when the exporter itself dies. Hence the second rule, which watches the watcher.
+groups:
+  - name: dendra-liveness
+    rules:
+      - alert: DendraChainStalled
+        # 5 minutes is derived, not chosen: the interval MEASURED on this chain is ~5.3 s/block, so a
+        # healthy chain applies ~56 blocks in this window. Zero of them is not a slow round.
+        expr: increase(dendra_block_height[5m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The chain has applied no block for at least 5 minutes."
+          description: >-
+            dendra_block_height has not moved. Every other Dendra metric is read FROM the chain, so on a
+            stopped chain they all stay green — validators read as bonded and not jailed, and the missed
+            block counter freezes because missed blocks are only counted on blocks that get produced.
+            With the voting power split so that no validator holds two thirds alone, one validator being
+            down stops production for everyone; check the OTHER validators, not only this host. Block
+            production resumes on its own when the missing node comes back.
+
+      - alert: DendraExporterDown
+        # WITHOUT THIS RULE THE ONE ABOVE IS SILENT EXACTLY WHEN IT MATTERS: `increase()` over a series
+        # that no longer exists returns no samples, so a dead exporter produces no alert rather than an
+        # alert about nothing being measured. Absent is not healthy.
+        expr: up{job="dendra"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The Dendra exporter is not being scraped — liveness is UNKNOWN, not fine."
+          description: >-
+            No metrics are arriving, so DendraChainStalled cannot fire either: it has nothing to measure.
+            Treat this as "we do not know whether the chain is producing", never as "the chain is fine".
