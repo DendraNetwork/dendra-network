@@ -1,0 +1,23 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "amino/amino.proto";
+import "dendra/modelregistry/v1/model.proto";
+import "dendra/modelregistry/v1/params.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/modelregistry/types";
+
+// GenesisState defines the modelregistry module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+
+  // models — the registry of AUTHORIZED models laid down at genesis. Pinning them here bypasses
+  // governance, so a devnet can start with its canonical model or models already registered and
+  // active.
+  repeated Model models = 2 [(gogoproto.nullable) = false];
+}

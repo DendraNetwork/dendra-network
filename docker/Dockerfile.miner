@@ -1,0 +1,67 @@
+# STANDALONE MINER image (dendrad binary + Python miner client) to JOIN a remote Dendra testnet.
+# Multi-stage: builds dendrad from chain, then a slim python runtime. It depends on NO pre-built
+# image (unlike Dockerfile.services, which does COPY --from=dendra/chain).
+# Build context = repository ROOT. This build is not exercised by CI; validate it on your host.
+
+# --- Stage 1: chain binary (the miner shells out to dendrad to sign and query through DENDRA_NODE) ---
+FROM golang:1.25-bookworm AS chainbuild
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# The compiler is the one pinned by the `toolchain` directive of chain/go.mod, not the one that
+# happens to ship in this base image. The official golang images set GOTOOLCHAIN=local, which makes
+# the directive a no-op and builds the chain with a different compiler than CI and than every release
+# -- the second source of truth the pin exists to prevent, and it drifts without a word. Restoring
+# `auto` puts go.mod back in charge; the version is never named here, so there is nothing to keep
+# in sync when the pin moves.
+ENV GOTOOLCHAIN=auto
+
+# Version stamped into the binary. Without it `dendrad version` prints an empty line and an operator
+# cannot tell which build is running. The injection is the one used by .github/workflows/release.yml:
+# the value travels through -ldflags and is never written into a tracked file, so the tree that gets
+# built is exactly the tree that was checked out.
+#   docker build --build-arg VERSION="$(git describe --tags --always)" \
+#                --build-arg COMMIT="$(git rev-parse HEAD)" -f docker/Dockerfile.miner .
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+WORKDIR /chain
+COPY chain/ /chain/
+# -trimpath, -buildvcs=false and CGO_ENABLED=0 mirror the release workflow, so the binary in this
+# image is byte-for-byte the published release binary for the same tag and platform: its SHA-256 can
+# be checked against the release SHA256SUMS.binaries. Dropping any of the three breaks that property.
+# CGO_ENABLED=0 also yields the static binary that the slim runtime stage below expects.
+RUN ( CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+        -ldflags "-X github.com/cosmos/cosmos-sdk/version.Name=dendra \
+                  -X github.com/cosmos/cosmos-sdk/version.AppName=dendrad \
+                  -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION} \
+                  -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT}" \
+        -o /go/bin/dendrad ./cmd/dendrad ) \
+    || ( echo "dendrad build failed -> check ./cmd/dendrad in chain (see docker/README.md)"; exit 1 )
+
+# dendra-vrf is the MINER's ECVRF utility (cmd/dendra-vrf/main.go: "produces and verifies ECVRF proofs on
+# the MINER side"). It is NOT optional for a miner that intends to be paid for availability.
+#
+# WHY IT MUST BE IN THIS IMAGE. The vrf_pubkey is anchored AT REGISTRATION, and under verification_mode=1
+# — the incentivised configuration — ADR-022 closes the GPU-less echo: ProveAvailability returns
+# ErrUnauthorized for any miner whose vrf_pubkey is empty, and payAvailability skips it a second time. A
+# miner whose image lacks this binary therefore registers without a key and can never prove availability,
+# while serving jobs perfectly and reporting itself healthy. The client cannot fail loudly on its own: it
+# has no way to know, at startup, whether the chain it will join runs the incentivised configuration.
+#
+# So the requirement is structural, not incidental: an image must ship every binary the code it carries
+# invokes by absolute path. dendra/onchain-staging/dendra_image_binaires_garde.sh enforces exactly that.
+RUN ( CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /go/bin/dendra-vrf ./cmd/dendra-vrf ) \
+    || ( echo "dendra-vrf build failed -> check ./cmd/dendra-vrf in chain"; exit 1 )
+
+# --- Stage 2: miner runtime (slim) ---
+FROM python:3.12-slim
+RUN pip install --no-cache-dir cryptography requests prometheus_client
+WORKDIR /app
+COPY services/ /app/
+COPY docker/entrypoint-services.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && mkdir -p /data/keys
+COPY --from=chainbuild /go/bin/dendrad /usr/local/bin/dendrad
+COPY --from=chainbuild /go/bin/dendra-vrf /usr/local/bin/dendra-vrf
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["/entrypoint.sh"]
