@@ -1,0 +1,28 @@
+dendra=70784a25db1940ae8ab1fab2e363bc278f37d6d1a4eb1f8f8226ccc30ed1191c
+# GENESIS SHA256 -- line 1 is `<chain_id>=<sha256 of the genesis.json this network serves>`, lowercase
+# hex, nothing else on the line. Everything below is commentary.
+#
+# WHY THIS FILE EXISTS. deploy/join.sh downloads the genesis at GENESIS_URL and compares it with
+# GENESIS_SHA256 -- and BOTH come from the same network-info.txt, served by the same host, over plain
+# HTTP; so does CHAIN_ID. Whoever can serve a forged genesis can serve the matching hash beside it, and
+# the check said so in as many words ("get the sha from a SECOND source") without naming one. This
+# file is that second source: it reaches an operator through the repository they cloned, not through
+# the host that serves the genesis. Two hosts, one operator.
+#
+# WHAT IT CLOSES, AND WHAT IT DOES NOT. It closes a forged GENESIS: a joiner running this tree refuses
+# any served genesis that is not the one named here, whatever network-info says beside it -- including
+# its CHAIN_ID line, which unlocks nothing. It does not close a compromised operator (who holds both
+# hosts), a compromised repository host, nor the other lines of network-info -- trust point, RPC
+# endpoint, seeds -- which no second source covers.
+#
+# READ BY deploy/join.sh (its genesis check): equal -> said; different -> refuse; missing or malformed
+# -> refuse as well, since every published path runs from a clone that carries this file. The one
+# named opt-out is DENDRA_ALLOW_UNVERIFIED_GENESIS=1, for a network the operator already trusts.
+# The operator's own checks are meant to re-read this line against what the genesis host declares and
+# serves; a stale pin surfaces there, not in this file.
+#
+# CHANGES WITH EVERY NEW GENESIS. A relaunch produces a new genesis and a new hash; the launcher
+# rewrites line 1, and it must then be committed and republished in the SAME gesture as the genesis,
+# or every joiner is refused a legitimate network (the refusal names this cause first). It is keyed
+# on chain_id and NOT on the consensus epoch: the epoch describes the state machine, this hash
+# describes one instance of a chain, and a fresh genesis at an unchanged epoch is possible.

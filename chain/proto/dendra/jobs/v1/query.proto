@@ -1,0 +1,380 @@
+syntax = "proto3";
+
+package dendra.jobs.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "dendra/jobs/v1/beacon.proto";
+import "dendra/jobs/v1/commit.proto";
+import "dendra/jobs/v1/job.proto";
+import "dendra/jobs/v1/miner.proto";
+import "dendra/jobs/v1/params.proto";
+import "dendra/jobs/v1/pools.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/jobs/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/params";
+  }
+
+  // GetMiner returns a single miner by its identifier.
+  rpc GetMiner(QueryGetMinerRequest) returns (QueryGetMinerResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/miner/{miner_id}";
+  }
+
+  // ListMiner returns the registered miners, paginated.
+  rpc ListMiner(QueryAllMinerRequest) returns (QueryAllMinerResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/miner";
+  }
+
+  // GetJob returns a single job by its identifier.
+  rpc GetJob(QueryGetJobRequest) returns (QueryGetJobResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/job/{job_id}";
+  }
+
+  // ListJob returns the jobs, paginated.
+  rpc ListJob(QueryAllJobRequest) returns (QueryAllJobResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/job";
+  }
+
+  // GetPools returns the module's reward pools.
+  rpc GetPools(QueryGetPoolsRequest) returns (QueryGetPoolsResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/pools";
+  }
+
+  // GetCommit returns the commit published for a job.
+  rpc GetCommit(QueryGetCommitRequest) returns (QueryGetCommitResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/commit/{job_id}";
+  }
+
+  // ListCommit returns the commits, paginated.
+  rpc ListCommit(QueryAllCommitRequest) returns (QueryAllCommitResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/commit";
+  }
+
+  // GetBeacon returns the seed beacon of a job.
+  rpc GetBeacon(QueryGetBeaconRequest) returns (QueryGetBeaconResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/beacon/{job_id}";
+  }
+
+  // ListBeacon returns the beacons, paginated.
+  rpc ListBeacon(QueryAllBeaconRequest) returns (QueryAllBeaconResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/beacon";
+  }
+
+  // GetAvailChallenge returns the current availability challenge and its epoch. A miner answers it
+  // with ProveAvailability.
+  rpc GetAvailChallenge(QueryGetAvailChallengeRequest) returns (QueryGetAvailChallengeResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/avail_challenge";
+  }
+
+  // CommitteeSeedHealth reports the health of the decentralized committee randomness: the seed
+  // source in use, the contributor floor, the most recent decentralized seed and how many
+  // validators contributed to it. The exporter derives the dendra_committee_grinding_inactive
+  // metric from it — while that metric is high, grinding resistance is not actually in force.
+  rpc CommitteeSeedHealth(QueryCommitteeSeedHealthRequest) returns (QueryCommitteeSeedHealthResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/committee_seed_health";
+  }
+
+  // AssignedCommittee returns the committee ASSIGNED to a job, READ from the chain (ADR-034).
+  // A client must never re-derive the draw locally: a second implementation of consensus
+  // arithmetic drifts from the first, and a client that computes a different committee than the
+  // chain enforces will reject valid answers. Ask the chain instead.
+  //
+  // `members` is ORDERED by the consensus sort, so members[0] is the PRIMARY under optimistic
+  // verification (k = 1), and a committee of size k is the k-element PREFIX of the same total order.
+  //
+  // The query FAILS while the job's seed is unrevealed. A draw that cannot be known must be a loud
+  // stop, never an empty list indistinguishable from a job with no committee.
+  rpc AssignedCommittee(QueryAssignedCommitteeRequest) returns (QueryAssignedCommitteeResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/assigned_committee/{job_id}";
+  }
+
+  // AuditCommittee returns the JURY ANCHORED for a job — the only list `auditVerdictTally` accepts a
+  // verdict from, hence the only thing standing between an honest miner and a slash.
+  //
+  // ⛔ IT HAD NO READER AT ALL, AND THAT COST TWO WRONG DIAGNOSES IN ONE EVENING (2026-08-11). The
+  // anchor lives at `audit_committee/value/<jobId>` and was reachable only through a raw
+  // `abci_query` with the key prefix hardcoded by the caller. The neighbouring query,
+  // `AssignedCommittee`, answers a DIFFERENT question — who was assigned the WORK, primary first —
+  // and its name invites exactly the confusion it received: a 3-member work committee was read as a
+  // jury and declared unable to reach quorum, while the real jury had 12 members.
+  //
+  // A miner cannot otherwise learn that it is summoned, and an operator cannot audit a jury. The
+  // absence of an anchor is NotFound, never an empty list: "no jury was drawn" and "the jury is
+  // empty" are different facts and only one of them is about this job.
+  rpc AuditCommittee(QueryAuditCommitteeRequest) returns (QueryAuditCommitteeResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/audit_committee/{job_id}";
+  }
+
+  // AuditDeferred returns the jobs SELECTED by the audit lottery whose OPENING was deferred,
+  // because the seed was unavailable or the pool of eligible jurors was below the floor (ADR-034).
+  //
+  // This class cannot be derived from job state: a deferred job is indistinguishable from one the
+  // lottery never sampled. It is the `deferred_no_jury` class of the audit partition, and without
+  // it "zero false slashes" is satisfied trivially by auditing nothing — a green result that
+  // measures nothing at all.
+  rpc AuditDeferred(QueryAuditDeferredRequest) returns (QueryAuditDeferredResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/audit_deferred";
+  }
+
+  // HeldSummary reports the total and the age of what the module currently WITHHOLDS.
+  //
+  // A sub-quorum audit defers instead of clawing back, which makes "held is not lost" the central
+  // promise of that path — and a promise without a measurement cannot be checked. `held_total` and
+  // `oldest_age_blocks` are the two fields able to CONTRADICT it: an age that only ever grows says
+  // the network is not healing, and a total that swells says deferral is blocking escrow. This
+  // query exists to produce the result that would force the opposite conclusion (ADR-033).
+  rpc HeldSummary(QueryHeldSummaryRequest) returns (QueryHeldSummaryResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/held_summary";
+  }
+
+  // ValidatorVrfKey reads back the VRF public key ANCHORED for an operator.
+  //
+  // WHY IT EXISTS: nothing else could read it. `MsgRegisterValidatorVrfKey` writes the key and no
+  // query exposed it, so an operator could only learn whether its anchoring had landed from the
+  // receipt of its own transaction — a receipt it may not have kept — or from the node's diagnostic
+  // log AFTER being bonded, which is too late: an unanchored key makes a bonded validator contribute
+  // nothing to the seed while every published indicator reports it healthy.
+  //
+  // ABSENCE IS AN ANSWER, NOT AN ERROR: an operator with no anchored key gets `anchored = false` and
+  // a successful call. gRPC errors are reserved for a real failure to read, so a caller can tell
+  // "there is no key" from "I could not find out" — the two must never collapse.
+  rpc ValidatorVrfKey(QueryValidatorVrfKeyRequest) returns (QueryValidatorVrfKeyResponse) {
+    option (google.api.http).get = "/dendra/jobs/v1/validator_vrf_key/{operator}";
+  }
+}
+
+// ValidatorVrfKey request and response.
+message QueryValidatorVrfKeyRequest {
+  // Operator ACCOUNT address (the same bytes as the valoper address, bech32-encoded as an account).
+  // This is the key `MsgRegisterValidatorVrfKey` anchors under.
+  string operator = 1;
+}
+
+message QueryValidatorVrfKeyResponse {
+  string operator   = 1;
+  string pubkey_hex = 2; // Empty when nothing is anchored.
+  bool   anchored   = 3; // False means "no key for this operator", not "the query failed".
+}
+
+// CommitteeSeedHealth request and response.
+message QueryCommitteeSeedHealthRequest {}
+
+// QueryCommitteeSeedHealthResponse describes the seed source in force and the freshness of the last
+// decentralized seed.
+message QueryCommitteeSeedHealthResponse {
+  uint64 committee_seed_source = 1;          // 0 = legacy; 1 = decentralized VRF.
+  uint64 committee_min_vrf_contributors = 2; // Configured contributor floor.
+  int64  latest_seed_height = 3;             // Height of the most recent decentralized seed; 0 if there is none.
+  uint64 latest_contributors = 4;            // Number of contributors to the seed at that height.
+  bool   has_recent_seed = 5;                // True when a decentralized seed exists at the current height or the one before.
+  int64  current_height = 6;
+  // Contributor POWER share of that seed, in basis points of the commit power.
+  //
+  // THE SECOND BAR, WHICH NOTHING EXPOSED. `committeeBaseSeedSourced` refuses a seed under EITHER of
+  // two independent bars: the head count above, and this share against `MinVrfContributorPowerBps`
+  // (a Go constant, 6667). A set whose COUNT is met while a large contributor stays silent falls
+  // under this one — legacy fallback, anti-grinding inactive — while a report reading only the
+  // count would announce the floor as held. Published so a health check can tell the two apart.
+  uint64 contributor_power_bps = 7;
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryGetMinerRequest defines the QueryGetMinerRequest message.
+message QueryGetMinerRequest {
+  string miner_id = 1;
+}
+
+// QueryGetMinerResponse defines the QueryGetMinerResponse message.
+message QueryGetMinerResponse {
+  Miner miner = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllMinerRequest defines the QueryAllMinerRequest message.
+message QueryAllMinerRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllMinerResponse defines the QueryAllMinerResponse message.
+message QueryAllMinerResponse {
+  repeated Miner miner = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetJobRequest defines the QueryGetJobRequest message.
+message QueryGetJobRequest {
+  string job_id = 1;
+}
+
+// QueryGetJobResponse defines the QueryGetJobResponse message.
+message QueryGetJobResponse {
+  Job job = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllJobRequest defines the QueryAllJobRequest message.
+message QueryAllJobRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllJobResponse defines the QueryAllJobResponse message.
+message QueryAllJobResponse {
+  repeated Job job = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetPoolsRequest defines the QueryGetPoolsRequest message.
+message QueryGetPoolsRequest {}
+
+// QueryGetPoolsResponse defines the QueryGetPoolsResponse message.
+message QueryGetPoolsResponse {
+  Pools pools = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryGetCommitRequest defines the QueryGetCommitRequest message.
+message QueryGetCommitRequest {
+  string job_id = 1;
+}
+
+// QueryGetCommitResponse defines the QueryGetCommitResponse message.
+message QueryGetCommitResponse {
+  Commit commit = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllCommitRequest defines the QueryAllCommitRequest message.
+message QueryAllCommitRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllCommitResponse defines the QueryAllCommitResponse message.
+message QueryAllCommitResponse {
+  repeated Commit commit = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetBeaconRequest defines the QueryGetBeaconRequest message.
+message QueryGetBeaconRequest {
+  string job_id = 1;
+}
+
+// QueryGetBeaconResponse defines the QueryGetBeaconResponse message.
+message QueryGetBeaconResponse {
+  Beacon beacon = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllBeaconRequest defines the QueryAllBeaconRequest message.
+message QueryAllBeaconRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllBeaconResponse defines the QueryAllBeaconResponse message.
+message QueryAllBeaconResponse {
+  repeated Beacon beacon = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetAvailChallengeRequest asks for the current availability challenge.
+message QueryGetAvailChallengeRequest {}
+
+// QueryGetAvailChallengeResponse carries the current challenge, its epoch and the epoch length.
+// avail_epoch_blocks = 0 means availability is disabled.
+message QueryGetAvailChallengeResponse {
+  string challenge = 1;
+  int64 epoch = 2;
+  uint64 avail_epoch_blocks = 3;
+}
+
+// QueryAssignedCommitteeRequest asks for the committee assigned to a job. Pass the bare job id,
+// without any role suffix.
+message QueryAssignedCommitteeRequest {
+  string job_id = 1;
+}
+
+// QueryAssignedCommitteeResponse lists the members ORDERED by the consensus sort (hash over stake,
+// compared as an exact cross product): members[0] is the primary, and the k-element prefix is the
+// committee of size k.
+message QueryAssignedCommitteeResponse {
+  repeated string members = 1;
+}
+
+// QueryAuditCommitteeRequest asks for the jury ANCHORED on a job. Pass the bare job id; set
+// `redo` to read the re-adjudication jury (ADR-033), anchored under a distinct key.
+message QueryAuditCommitteeRequest {
+  string job_id = 1;
+  bool redo = 2;
+}
+
+// QueryAuditCommitteeResponse lists the anchored jurors and the height at which they were seated.
+//
+// `anchored_height` is the twin the anchor is always written with: without it, "locked is not
+// seized" cannot be falsified — a juror held for three blocks and one held for a month look alike.
+message QueryAuditCommitteeResponse {
+  repeated string members = 1;
+  uint64 anchored_height = 2;
+}
+
+// QueryAuditDeferredRequest asks for the audits that were selected but deferred, i.e. the
+// `deferred_no_jury` class.
+message QueryAuditDeferredRequest {}
+
+// QueryAuditDeferredResponse lists the job ids currently marked as selected-but-not-opened, plus
+// the INDEPENDENT count of audits opened.
+//
+// `audits_opened` is incremented by the chain at opening time — whether the audit came from a
+// dispute or from the lottery, and whether it was deferred or anchored. It is the right-hand side
+// of the partition check. Without an independent source, "sum of the classes equals opened" would
+// be a tautology, both sides coming from the same enumeration, and a sum that cannot come out false
+// verifies nothing (ADR-033).
+message QueryAuditDeferredResponse {
+  repeated string job_ids = 1;
+  uint64 audits_opened = 2;
+}
+
+// QueryHeldSummaryRequest asks for the aggregate state of everything the module withholds.
+message QueryHeldSummaryRequest {}
+
+// QueryHeldSummaryResponse is the measurement that makes "held is not lost" falsifiable, across all
+// three pockets.
+//
+// The held fee is not the only thing in escrow: the BOND of a deferred dispute stays with the
+// module too, as does a juror's seat while the audit it was anchored to is unresolved. Counting
+// only the fee would leave "the bond stays claimable" exactly as unverifiable as "held is not lost"
+// was before this query existed — an invisible orphaned fund is the class this response closes.
+message QueryHeldSummaryResponse {
+  uint64 held_total = 1;          // Sum of held fees (udndr) still withheld by the module.
+  uint64 held_count = 2;          // Number of jobs carrying a held fee.
+  uint64 oldest_age_blocks = 3;   // Age, in blocks, of the OLDEST dated held fee; 0 if there is none.
+  string oldest_job_id = 4;       // Job carrying that oldest held fee; empty if there is none.
+  uint64 bond_escrowed_total = 5; // Sum of dispute bonds still ESCROWED, i.e. open and unresolved disputes.
+  uint64 bond_escrowed_count = 6; // Number of open disputes carrying a bond.
+  // Third pocket: jurors held by the exit guard, that is, seats anchored to unresolved audits.
+  // "Locked is not seized" is measured here, and any decision on allowing exit after a vote rests
+  // on these numbers.
+  uint64 jurors_locked_count = 7;    // DISTINCT miners holding at least one seat anchored to an unresolved audit.
+  uint64 oldest_lock_age_blocks = 8; // Age, in blocks, of the OLDEST dated anchoring still open; 0 if there is none.
+  string oldest_lock_job_id = 9;     // Job of that oldest anchoring; empty if there is none.
+  // SENTINEL, ALWAYS non-zero and therefore never omitted by the codec.
+  //
+  // proto3 omits zero-valued fields, which makes "measured zero" indistinguishable from "field not
+  // present in this binary": a report could not PROVE that a zero had actually been measured. The
+  // value is the number of POCKETS this binary measures (3 = fee + bond + lock). Absent from the
+  // response, the binary predates the bond and lock pockets and their zeros are NOT measurements;
+  // at 3 or above, a zero in fields 5 to 9 is a MEASURED zero.
+  uint64 pockets_measured = 10;
+}

@@ -1,0 +1,34 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/modelregistry/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "dendra/x/modelregistry/Params";
+  option (gogoproto.equal) = true;
+
+  // audit_judge_model — ADR-027 D4. No execution path reads this field, and it must not be wired in
+  // as defined: its semantics contradict a security property the audit layer depends on.
+  //
+  // The original definition required every member of an audit committee to run the SAME model, on
+  // the assumption that different models would yield inconsistent verdicts. The opposite holds:
+  // HOMOGENEITY is the hazard, because it makes judge errors CORRELATED — a single-model jury
+  // false-slashes honest miners at 1% to 19%, a rate that a heterogeneous mix (MoE + nemo) brings to
+  // zero. Hence the heterogeneity the C1/C3 gates require. Pinning one canonical model would
+  // reintroduce exactly the correlated false-slash those gates exist to close.
+  //
+  // The correct primitive is not a single identifier but an ALLOW-LIST: several admissible models,
+  // models below the capability floor refused. That allow-list is enforced OFF-CHAIN today, by the
+  // launcher's hardware probe (`deploy/hw_probe.sh`, `_is_allowed_judge`) — real, but not part of
+  // consensus. Do not claim that the judge is constrained by an ON-CHAIN model.
+  //
+  // Two resolutions are open: drop the field and own the off-chain allow-list, or replace it with an
+  // on-chain allow-list (`repeated string`), which requires a proto regeneration and moves the guard
+  // into consensus. Until one is chosen the field stays INERT — an inert parameter is less harmful
+  // than a parameter that enforces the wrong property.
+  string audit_judge_model = 1;
+}
