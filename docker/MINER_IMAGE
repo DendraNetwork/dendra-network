@@ -1,0 +1,21 @@
+# docker/MINER_IMAGE -- the prebuilt miner image deploy/join.sh may pull instead of building one.
+#
+# READ FROM THE CLONE, NEVER FROM network-info.txt. network-info is fetched over plain HTTP, so an
+# image named there would be chosen by whoever sits on the path, and join.sh runs that image next to
+# the volume that holds the miner's keys. This file arrives with the repository, over HTTPS git, like
+# docker/GENESIS_SHA256. join.sh ignores a DENDRA_MINER_IMAGE served by network-info.
+#
+# HOW IT IS WRITTEN. After a release, take the two lines of that release's miner-image.txt asset
+# (.github/workflows/release.yml, job miner-image), put them below these comments, and commit them:
+#   # built-for: kit_version=<K> consensus_epoch=<E> release=<vX.Y.Z>
+#   DENDRA_MINER_IMAGE=ghcr.io/dendranetwork/dendra-miner@sha256:<64 lowercase hex>
+# join.sh accepts exactly that value form -- the official namespace and a full digest, never a tag -- and
+# builds the image from the clone otherwise, saying why. The package has to be public: when the pull
+# fails, join.sh warns and builds from the clone as well.
+#
+# THE PIN HOLDS ONLY FOR THE GATES IT WAS BUILT FOR. The `built-for` line names them. The repository is
+# not published while they differ from docker/KIT_VERSION or docker/CONSENSUS_EPOCH, and a release is not
+# tagged while a value is present: the image would run code another kit was released with. Empty the
+# value line, with its `built-for` line, before either moves; the next release pins its own image.
+#
+# With no value line below, join.sh builds the miner image from the clone.

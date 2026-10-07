@@ -1,0 +1,292 @@
+name: release
+
+# Publishes ready-to-run `dendrad` binaries when a version tag is pushed, so that operating a node
+# does not require installing a Go toolchain and compiling the chain first.
+#
+#   Trigger:  pushing a tag vMAJOR.MINOR.PATCH, whose number follows the two gates of VERSION
+#             (docs/adr/ADR-050)
+#   Result:   a GitHub Release carrying one archive per platform, a SHA256SUMS file for the archives,
+#             a SHA256SUMS.binaries file for the uncompressed binaries, and the miner image's digest;
+#             its title and notes are read from the tagged tree (.github/release_notes.sh).
+#
+# The binaries are reproducible: a third party who checks out the same tag and runs the documented
+# command obtains a binary with the same SHA-256. That property is what makes a published checksum
+# worth anything -- a hash nobody can recompute proves only that some machine once produced some file.
+# It is held by four decisions, none of which is optional:
+#
+#   * the Go toolchain is pinned by the `toolchain` directive in go.mod, not by the runner image;
+#   * `-trimpath` removes the build directory from the binary;
+#   * the version and commit are injected through `-ldflags -X`, never by editing a tracked file, so
+#     the source tree that is built is exactly the tree the tag points at;
+#   * `-buildvcs=false` keeps the VCS stamp out of the binary, which would otherwise embed the state
+#     of the builder's checkout and differ for anyone building from a source archive.
+#
+# CGO_ENABLED=0 yields a static binary (goleveldb, no RocksDB) that runs without system dependencies.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # No binary is published from a tree that does not build, vet, test and regenerate cleanly. A
+  # release is the one artifact users cannot inspect before trusting, so the gate belongs here and
+  # not only on the branch.
+  verify:
+    name: Verify the tagged tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: chain/go.mod
+          cache-dependency-path: chain/go.sum
+
+      - name: go build
+        working-directory: chain
+        run: go build ./...
+
+      - name: go vet
+        working-directory: chain
+        run: go vet ./...
+
+      - name: go test
+        working-directory: chain
+        run: go test ./...
+
+      - name: Generated protobuf code matches the .proto sources
+        working-directory: chain
+        run: make proto-check
+
+      # The notes are read from the tagged tree (VERSION and the tag's section of CHANGELOG.md). Writing
+      # them here, before the platform builds and the miner image, fails the run before those start.
+      - name: The release notes can be written from this tree
+        env:
+          VERSION: ${{ github.ref_name }}
+          CLONE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bash .github/release_notes.sh --title "$VERSION"
+          bash .github/release_notes.sh "$VERSION" "$CLONE_URL" > /dev/null
+
+  build:
+    name: Build dendrad (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false          # one platform failing must not hide the result for the others
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The version comes from the `toolchain` directive in go.mod. Naming a version here as well
+          # would create a second source of truth that silently drifts from the one the Makefile and
+          # every contributor use.
+          go-version-file: chain/go.mod
+          cache-dependency-path: chain/go.sum
+
+      - name: Build
+        working-directory: chain
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ldflags="-X github.com/cosmos/cosmos-sdk/version.Name=dendra"
+          ldflags="$ldflags -X github.com/cosmos/cosmos-sdk/version.AppName=dendrad"
+          ldflags="$ldflags -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION}"
+          ldflags="$ldflags -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT}"
+          mkdir -p "${GITHUB_WORKSPACE}/dist"
+          go build -trimpath -buildvcs=false -ldflags "$ldflags" \
+            -o "${GITHUB_WORKSPACE}/dist/dendrad" ./cmd/dendrad
+
+      - name: Archive and checksum
+        working-directory: dist
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          base="dendrad_${VERSION}_${GOOS}_${GOARCH}"
+
+          # Checksum of the uncompressed binary. This is the figure a rebuilder compares against:
+          # it depends only on the compiler and the source, never on how the archive was packed.
+          sha256sum dendrad | sed "s|dendrad$|${base}/dendrad|" > "${base}.bin.sha256"
+
+          # The archive is packed deterministically as well: fixed entry order, fixed timestamps
+          # taken from the tagged commit, no owner names, and gzip without its own timestamp field.
+          # Left to their defaults, tar and gzip embed the build time and make every rebuild differ.
+          epoch="$(git -C "${GITHUB_WORKSPACE}" log -1 --format=%ct)"
+          mkdir -p "${base}"
+          cp dendrad "${base}/dendrad"
+          for extra in LICENSE NOTICE; do
+            if [ -f "${GITHUB_WORKSPACE}/${extra}" ]; then
+              cp "${GITHUB_WORKSPACE}/${extra}" "${base}/${extra}"
+            fi
+          done
+          tar --sort=name --format=gnu --mtime="@${epoch}" \
+              --owner=0 --group=0 --numeric-owner \
+              -cf - "${base}" | gzip -n -9 > "${base}.tar.gz"
+          sha256sum "${base}.tar.gz" > "${base}.tar.gz.sha256"
+          rm -rf "${base}" dendrad
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error      # an empty upload must not travel on as a success
+
+  # THE MINER IMAGE, PREBUILT, so a miner does not compile the chain on its rig. Pushed to the
+  # repository's container registry and reported by DIGEST, never by tag: a tag can be moved after the
+  # fact, a digest names the exact bytes built here.
+  # ⛔ THE DIGEST REACHES JOINERS ONLY ONCE IT IS COMMITTED TO docker/MINER_IMAGE. deploy/join.sh reads
+  # the pin from the clone (HTTPS git) and IGNORES any value network-info.txt serves: that file travels
+  # over plain HTTP, and an image named there would be chosen by whoever sits on the path. So after
+  # this job, copy the two lines of miner-image.txt into docker/MINER_IMAGE and commit them; until then every
+  # joiner builds the image from its clone. The package must also be public, or the pull fails and
+  # join.sh falls back to that same build.
+  miner-image:
+    name: Publish the miner image
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write                   # narrowed to the single job that pushes an image
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build, push, and read back the digest
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          OWNER: ${{ github.repository_owner }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')/dendra-miner"
+          printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker build --build-arg VERSION="$VERSION" --build-arg COMMIT="$COMMIT" \
+            -f docker/Dockerfile.miner -t "$image:$VERSION" .
+          docker push "$image:$VERSION"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$VERSION")"
+          case "$digest" in "$image@sha256:"*) ;; *) echo "no digest after the push: '$digest'"; exit 1 ;; esac
+          # The two gates this image was built for, from the tagged tree. join.sh skips comment lines; the
+          # publication refuses a pin whose gates differ from the tree being published, since the image
+          # would then run code another kit was released with.
+          kv="$(sed -n 's/^kit_version=//p' VERSION | tr -d '\r' | head -1)"
+          ce="$(sed -n 's/^consensus_epoch=//p' VERSION | tr -d '\r' | head -1)"
+          [[ "$kv" =~ ^[0-9]+$ && "$ce" =~ ^[0-9]+$ ]] || { echo "VERSION: unreadable gates ('$kv', '$ce')"; exit 1; }
+          {
+            echo "# built-for: kit_version=$kv consensus_epoch=$ce release=$VERSION"
+            echo "DENDRA_MINER_IMAGE=$digest"
+          } | tee miner-image.txt
+          echo "Commit both lines above to docker/MINER_IMAGE: join.sh pins the miner image from the clone only."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: miner-image
+          path: miner-image.txt
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [build, miner-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write                   # narrowed to the single job that actually writes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: miner-image
+          path: dist
+
+      - name: Assemble the checksum files
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          cat *.tar.gz.sha256   | sort -k2 > SHA256SUMS
+          cat *.bin.sha256      | sort -k2 > SHA256SUMS.binaries
+          rm -f *.tar.gz.sha256 *.bin.sha256
+
+          # A release whose asset list is empty would otherwise be published as a success.
+          count="$(find . -name '*.tar.gz' | wc -l)"
+          [ "$count" -gt 0 ] || { echo "no archive was produced"; exit 1; }
+          echo "archives: $count"
+          cat SHA256SUMS SHA256SUMS.binaries
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ github.ref_name }}
+          CLONE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bash .github/release_notes.sh "$VERSION" "$CLONE_URL" > notes.md
+          bash .github/release_notes.sh --title "$VERSION" > title.txt
+          cat title.txt notes.md
+
+      # THIS JOB IS THE RELEASE'S ONLY CREATOR. Pushing the tag is the whole of the maintainers' part;
+      # nothing else creates the release. When two steps both created it, the second always failed, and it
+      # was this one, the step that attaches the binaries: every release of the v0.1 line was published
+      # with no file attached (docs/adr/ADR-050).
+      # A release that already exists is a re-run of this job after a partial failure: its archives and
+      # checksums are replaced, since those builds are reproducible, and only then are its title and notes
+      # rewritten and a draft published. `miner-image.txt` is the exception: a re-run builds and pushes
+      # the image again under another digest, so a digest already attached, which may already be pinned in
+      # docker/MINER_IMAGE, is kept, and the new one is printed in this run's log. Any other failure of
+      # `gh release view` falls through to `create`, which then fails loudly rather than guess.
+      - name: Create or complete the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          title="$(cat title.txt)"
+          assets=(dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.binaries)
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "release $VERSION exists: completing it"
+            # Files first, publication last: a failed upload must leave a draft, never a published
+            # release without its binaries.
+            gh release upload "$VERSION" "${assets[@]}" --clobber
+            names="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
+            case $'\n'"$names"$'\n' in
+              *$'\n'miner-image.txt$'\n'*)
+                echo "miner-image.txt already attached, kept. This run built: $(cat dist/miner-image.txt)" ;;
+              *)
+                gh release upload "$VERSION" dist/miner-image.txt ;;
+            esac
+            gh release edit "$VERSION" --title "$title" --notes-file notes.md --draft=false
+          else
+            gh release create "$VERSION" --title "$title" --notes-file notes.md --verify-tag \
+              "${assets[@]}" dist/miner-image.txt
+          fi

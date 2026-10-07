@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dendra</title>
+<style>
+:root { --bg:#f6f7f5; --card:#ffffff; --ink:#1d2320; --muted:#5d6a63; --line:#dfe4e0; --accent:#1f7a55; --warn:#a15c00; --bad:#a3262a; --chip:#eef3f0; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111513; --card:#1a201d; --ink:#e7ece9; --muted:#9aa8a0; --line:#2b332f; --accent:#4fbf8b; --warn:#e3a54a; --bad:#ef6b6f; --chip:#232b27; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:16px 24px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; }
+header h1 { margin:0; font-size:20px; letter-spacing:.3px; }
+.pill { padding:3px 10px; border-radius:99px; font-size:13px; background:var(--chip); color:var(--muted); }
+.pill.ok { color:var(--accent); } .pill.bad { color:var(--bad); } .pill.warn { color:var(--warn); }
+main { max-width:1100px; margin:0 auto; padding:20px 24px 48px; display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+.card h2 { margin:0 0 10px; font-size:15px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
+.wide { grid-column:1 / -1; }
+dl { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; }
+dt { color:var(--muted); } dd { margin:0; font-variant-numeric:tabular-nums; word-break:break-all; }
+.big { font-size:28px; font-weight:600; }
+button { font:inherit; padding:7px 14px; border-radius:7px; border:1px solid var(--line); background:var(--chip); color:var(--ink); cursor:pointer; }
+button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+.row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+input { font:inherit; padding:7px 10px; border-radius:7px; border:1px solid var(--line); background:var(--bg); color:var(--ink); width:100%; }
+.words { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin:12px 0; }
+.word { background:var(--chip); border-radius:6px; padding:6px 8px; font-family:ui-monospace, monospace; }
+.word b { color:var(--muted); font-weight:400; margin-right:6px; }
+.note { color:var(--muted); font-size:13px; }
+.alert { border-left:4px solid var(--warn); padding-left:12px; }
+pre { background:var(--chip); padding:10px; border-radius:7px; max-height:360px; overflow:auto; font-size:12px; white-space:pre-wrap; }
+.hidden { display:none; }
+.msg { margin-top:8px; font-size:13px; }
+</style>
+</head>
+<body>
+<header><h1>Dendra</h1><span id="state" class="pill">loading…</span><span id="netpill" class="pill hidden"></span></header>
+<main id="main">
+  <section id="setup" class="card wide hidden">
+    <h2>Set up this machine</h2>
+    <p id="setupHint"></p>
+    <p class="note">The installer prepares Docker and the GPU runtime, downloads the network's settings, creates the miner's key and registers it. It changes nothing without <code>--yes</code>, and lists every change first.</p>
+  </section>
+
+  <section id="recovery" class="card wide hidden">
+    <h2>Your recovery phrase</h2>
+    <p class="alert">These words are the only way to recover this miner's account and its rewards. Write them on paper, in order. Nobody from Dendra will ever ask for them.</p>
+    <div id="words" class="words"></div>
+    <p>To confirm you wrote them down, type the words at these positions:</p>
+    <div id="ask" class="row"></div>
+    <div class="row"><button class="primary" id="confirmBtn">I wrote them down</button></div>
+    <div id="recoveryMsg" class="msg"></div>
+  </section>
+
+  <section class="card dash" id="minerCard">
+    <h2>Miner</h2>
+    <dl>
+      <dt>Identity</dt><dd id="mid">—</dd>
+      <dt>Address</dt><dd id="addr">—</dd>
+      <dt>Containers</dt><dd id="ctr">—</dd>
+      <dt>Role</dt><dd id="role">—</dd>
+    </dl>
+    <div class="row">
+      <button id="startBtn">Start</button><button id="stopBtn">Stop</button><button id="restartBtn">Restart</button>
+      <button id="logsBtn">Logs</button>
+    </div>
+    <div id="minerMsg" class="msg"></div>
+  </section>
+
+  <section class="card dash">
+    <h2>Account</h2>
+    <div class="big" id="balance">—</div>
+    <dl>
+      <dt>Registered</dt><dd id="registered">—</dd>
+      <dt>Stake</dt><dd id="stake">—</dd>
+      <dt>Subsidy to claim</dt><dd id="subsidy">—</dd>
+    </dl>
+    <p class="note">The miner claims its subsidy by itself when there is some to claim.</p>
+  </section>
+
+  <section class="card dash">
+    <h2>Final Testnet Season</h2>
+    <dl>
+      <dt>Day</dt><dd id="day">—</dd>
+      <dt>Ranked days</dt><dd id="ranked">—</dd>
+      <dt>Earned in published rankings</dt><dd id="paid">—</dd>
+    </dl>
+    <p class="note">These figures are the programme's published rankings. A day is ranked only once it is final, the chain's <code>audit_unwind_blocks</code> plus a margin after its last block, so the current day has no figure yet. What a ranking assigns is transferred by the weekly payment: read your balance for what has arrived.</p>
+  </section>
+
+  <section class="card dash">
+    <h2>Latest ranked day</h2>
+    <div class="big" id="lastPaid">—</div>
+    <dl>
+      <dt>Day</dt><dd id="lastDay">—</dd>
+      <dt>Availability windows proven</dt><dd id="presence">—</dd>
+      <dt>Verified programme requests</dt><dd id="requests">—</dd>
+      <dt>Consistent verdicts</dt><dd id="verdicts">—</dd>
+    </dl>
+    <p id="lastParts" class="msg"></p>
+  </section>
+
+  <section class="card dash">
+    <h2>Where rewards go</h2>
+    <p class="note">By default to this miner's own address. You can choose another address you control.</p>
+    <input id="payout" placeholder="dendra1…" spellcheck="false" autocomplete="off">
+    <div class="row"><button id="payoutBtn">Save</button></div>
+    <div id="payoutMsg" class="msg"></div>
+  </section>
+
+  <section class="card dash wide">
+    <h2>How the Final Testnet Season pays</h2>
+    <p id="formulaNote"></p>
+    <p class="note">Known limits: one card can serve the programme's work for many identities. The number of requests is fixed, and the chain weighs each identity's stake in the draw up to <code>assignment_stake_cap_multiple</code> × <code>min_stake</code>, a multiple the launch genesis sets to 100, the highest the chain accepts: up to that ceiling an identity's weight is its stake, so splitting a stake into more identities buys no more work, and a larger stake draws a larger share of it; above the ceiling, splitting does buy more. What splitting still buys below it is presence and jury seats: each identity with at least one verified request that day is paid its own presence, and the audit draw seats each identity at most once, so several identities can hold several seats on one programme audit, each paid per consistent verdict. A smaller identity draws a request, and so earns its presence, on fewer days. Read both with <code>dendrad query jobs params -o json</code> (a multiple of 0, or absent, selects the compiled 2; a <code>min_stake</code> of 0 sets no ceiling). A proven window shows an online operator key, not a model.</p>
+  </section>
+
+  <section class="card wide hidden" id="logsCard">
+    <h2>Miner logs</h2>
+    <pre id="logs"></pre>
+  </section>
+</main>
+<script>
+"use strict";
+let token = (location.hash.match(/t=([A-Za-z0-9_-]+)/) || [])[1] || "";
+try { history.replaceState(null, "", location.pathname); } catch (e) {}
+// The access file that brought the token is removed after the first call: keep the token for this tab
+// only, so that reloading the page does not lose access.
+try { if (token) sessionStorage.setItem("dendra-token", token); else token = sessionStorage.getItem("dendra-token") || ""; } catch (e) {}
+const $ = (id) => document.getElementById(id);
+const unread = (v) => v === null || v === undefined;
+const dndr = (u) => unread(u) ? "not read" : (u / 1e6).toLocaleString(undefined, {maximumFractionDigits: 6}) + " DNDR";
+const amount = (u) => (u / 1e6).toLocaleString(undefined, {maximumFractionDigits: 6});
+
+// The formula, written from the rules the server sends (final_season_rules), never restated here.
+function formulaNote(r) {
+  if (!r || unread(r.work_per_request)) return "";
+  return "The Final Testnet Season pays each miner identity, per day, on facts the chain records: " + amount(r.work_per_request) +
+    " DNDR per verified programme request, the same for every miner; " + amount(r.juror_per_verdict) +
+    " DNDR per verdict consistent with the outcome; and " + amount(r.presence_per_window) +
+    " DNDR per availability window proven on chain, at most " + r.presence_max_windows + " a day, paid only on a day " +
+    "with at least one verified request, since proving a window needs no model. A day loses its work reward, and with " +
+    "it its presence reward, when its sampled answers to programme requests are all graded incoherent, on at least " +
+    "two grades (one when a single answer was sampled). There is no cap per identity: the programme pays at most " +
+    amount(r.cap_programme_day) + " DNDR a day, shared pro rata beyond, and " +
+    amount(r.cap_season) + " DNDR over the season. It sends " + r.requests_per_day + " requests a day, which the " +
+    "chain hands out among its present miners, drawn by stake.";
+}
+
+// What the latest ranked day's figures come to: the formula rerun by the server on the published facts
+// (`formula`), set against the published gross, then what was payable and paid, and the ranking's own reason.
+function lastParts(L) {
+  const out = [];
+  if (!L.listed) out.push("This identity is not in that day's ranking: no proven window, verified request or verdict was counted for it.");
+  const f = L.formula;
+  if (f) {
+    out.push("The formula on these facts: work " + amount(f.work_udndr) + " + juror " + amount(f.juror_udndr) +
+      " + presence " + amount(f.presence_udndr) + " = " + dndr(f.gross_udndr) + " gross" +
+      (f.gross_udndr === L.gross_udndr ? "." : "; the ranking states " + dndr(L.gross_udndr) + ": they differ."));
+  } else if (L.rules_differ) {
+    out.push("That ranking was computed with other rules than this application's copy (their fingerprints differ): the formula is not rerun here.");
+  }
+  if (L.payable_udndr !== L.gross_udndr || L.paid_udndr !== L.payable_udndr)
+    out.push("Gross " + dndr(L.gross_udndr) + ", payable " + dndr(L.payable_udndr) + ", paid " + dndr(L.paid_udndr) + ".");
+  if (L.reason) out.push("Reason: " + L.reason + ".");
+  return out.join(" ");
+}
+
+async function api(path, body) {
+  const opt = { headers: { "X-Dendra-App": token } };
+  if (body !== undefined) { opt.method = "POST"; opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(path, opt);
+  let d = {};
+  try { d = await r.json(); } catch (e) {}
+  return { status: r.status, data: d };
+}
+
+function setText(id, v) { $(id).textContent = v; }
+
+async function refresh() {
+  const { status, data } = await api("/api/overview");
+  if (status !== 200) { setText("state", "no access"); $("state").className = "pill bad"; return; }
+  if (!data.installed) {
+    $("setup").classList.remove("hidden");
+    setText("setupHint", data.hint);
+    setText("state", "not installed"); $("state").className = "pill warn";
+    document.querySelectorAll(".dash").forEach(e => e.classList.add("hidden"));
+    return;
+  }
+  $("setup").classList.add("hidden");
+  document.querySelectorAll(".dash").forEach(e => e.classList.remove("hidden"));
+  if (data.docker_error) {
+    // Docker did not answer: say why, never "no miner container", which is a reading it could not make.
+    setText("state", data.docker_error.startsWith("No access to Docker") ? "no access to Docker" : "Docker did not answer");
+    $("state").className = "pill bad";
+    setText("ctr", data.docker_error);
+  } else {
+    const miner = (data.containers || []).find(c => c.service === "miner");
+    const running = miner && miner.state === "running";
+    setText("state", running ? "running" : (miner ? miner.state : "no miner container"));
+    $("state").className = "pill " + (running ? "ok" : "bad");
+    setText("ctr", (data.containers || []).map(c => c.service + ": " + c.state).join(", ") || "none");
+  }
+  setText("mid", data.identity.miner_id || "not read");
+  setText("addr", data.identity.address || "not read");
+  setText("role", data.judge ? "miner and juror" : "miner");
+  const ch = data.chain || {};
+  setText("balance", dndr(ch.balance_udndr));
+  setText("registered", ch.registered === null || ch.registered === undefined ? "not read" : (ch.registered ? "yes" : "no"));
+  setText("stake", dndr(ch.stake_udndr));
+  setText("subsidy", dndr(ch.subsidy_claimable_udndr));
+  const p = data.programme || {};
+  const r = data.rules || {};
+  const latest = ["lastPaid", "lastDay", "presence", "requests", "verdicts"];
+  setText("lastParts", "");
+  // "?" is a value this screen could not read; it is never shown as 0 paid or 0 requests.
+  if (!p.enabled) {
+    ["day", "ranked", "paid"].concat(latest).forEach(i => setText(i, "—"));
+    // The Final Testnet Season counts what the chain records: the setting only lets this screen read the
+    // rankings.
+    setText("day", "not read: no programme address in this miner's settings (DENDRA_FINAL_SEASON_URL)");
+    setText("lastParts", "The Final Testnet Season counts what the chain records whether or not this setting is there; reading the rankings here, and naming where rewards go, need it.");
+  } else {
+    const st = p.status || {};
+    const day = st.day;
+    // The season ends at a fixed instant (`rules.end_time`, exclusive), read against the chain's block
+    // times; `ended` says whether the chain is past it. How many days it has is a reading of the chain,
+    // so the screen never shows "N of M". A missing or malformed field shows '?', never a guess.
+    const ended = st.ended;
+    const endAt = (st.rules && typeof st.rules.end_time === "string") ? Date.parse(st.rules.end_time) : NaN;
+    const endText = isNaN(endAt) ? null : (() => {
+      const e = new Date(endAt - 60000), m = ["January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December"], z = (x) => String(x).padStart(2, "0");
+      return e.getUTCDate() + " " + m[e.getUTCMonth()] + " " + e.getUTCFullYear() + ", " +
+        z(e.getUTCHours()) + ":" + z(e.getUTCMinutes()) + " UTC";
+    })();
+    setText("day", !p.status ? "?" : (day === null ? "the programme service has no block height yet" :
+      (unread(day) || (ended !== true && ended !== false) ? "?" : (day < 0 ? "not started" :
+        (ended ? "the season is over" + (Number.isInteger(st.last_day) ? " (its last day was day " + (st.last_day + 1) + ")" : "") :
+          "day " + (day + 1) + (endText ? ", the season ends " + endText : ", end not readable"))))));
+    setText("ranked", unread(p.ranked_days) ? "?" : (p.ranked_days === 0 ? "none yet" : String(p.ranked_days)));
+    setText("paid", unread(p.season_paid_udndr) ? "?" : dndr(p.season_paid_udndr) + " over " + p.ranked_days + " ranked day(s)");
+    const L = p.latest;
+    if (unread(p.ranked_days)) latest.forEach(i => setText(i, "?"));
+    else if (!L) { latest.forEach(i => setText(i, "—")); setText("lastDay", "no day ranked yet"); }
+    else {
+      setText("lastPaid", dndr(L.paid_udndr));
+      setText("lastDay", (L.day + 1) + " (ranking/day-" + String(L.day).padStart(3, "0") + ".json)");
+      setText("presence", L.presence + (L.presence > r.presence_max_windows ? " (at most " + r.presence_max_windows + " are paid)" : ""));
+      setText("requests", String(L.verified_requests));
+      setText("verdicts", String(L.verdicts));
+      setText("lastParts", lastParts(L));
+    }
+  }
+  setText("formulaNote", formulaNote(data.rules));
+  if (data.payout_address && !$("payout").value) $("payout").value = data.payout_address;
+  if (data.recovery_confirmed === false) loadRecovery();
+}
+
+let recoveryShown = false;
+async function loadRecovery() {
+  if (recoveryShown) return;
+  const { data } = await api("/api/recovery");
+  if (!data.present) return;
+  recoveryShown = true;
+  $("recovery").classList.remove("hidden");
+  const w = $("words"); w.innerHTML = "";
+  data.words.forEach((word, i) => { const d = document.createElement("div"); d.className = "word"; d.innerHTML = "<b>" + (i + 1) + "</b>"; d.appendChild(document.createTextNode(word)); w.appendChild(d); });
+  const a = $("ask"); a.innerHTML = "";
+  data.ask.forEach(n => { const inp = document.createElement("input"); inp.placeholder = "word " + n; inp.dataset.pos = n; inp.style.maxWidth = "160px"; inp.autocomplete = "off"; inp.spellcheck = false; a.appendChild(inp); });
+}
+
+$("confirmBtn").onclick = async () => {
+  const words = {};
+  document.querySelectorAll("#ask input").forEach(i => words[i.dataset.pos] = i.value);
+  const { status, data } = await api("/api/recovery/confirm", { words });
+  // recoveryShown goes back to false: a later key's phrase must be shown in this session too.
+  if (status === 200) { $("recovery").classList.add("hidden"); setText("recoveryMsg", ""); recoveryShown = false; }
+  else if (status === 409) {
+    // The phrase on screen is no longer the miner's (its key changed): show the current one, if any.
+    $("recovery").classList.add("hidden"); recoveryShown = false;
+    await loadRecovery();
+    setText("recoveryMsg", recoveryShown ? "The miner's key changed: these are the words of its new key." : "");
+  }
+  else setText("recoveryMsg", data.error || "not confirmed");
+};
+
+async function act(path, msgId) {
+  setText(msgId, "working…");
+  const { data } = await api(path, {});
+  setText(msgId, data.rc === 0 ? "done" : ("failed: " + (data.text || data.error || "")).slice(0, 400));
+  refresh();
+}
+$("startBtn").onclick = () => act("/api/start", "minerMsg");
+$("stopBtn").onclick = () => act("/api/stop", "minerMsg");
+$("restartBtn").onclick = () => act("/api/restart", "minerMsg");
+$("logsBtn").onclick = async () => { const { data } = await api("/api/logs"); $("logsCard").classList.remove("hidden"); setText("logs", data.text || ""); };
+$("payoutBtn").onclick = async () => {
+  setText("payoutMsg", "signing…");
+  const { status, data } = await api("/api/payout", { address: $("payout").value.trim() });
+  setText("payoutMsg", status === 200 ? "saved: rewards go to this address from now on" : (data.error || data.text || "refused").slice(0, 400));
+};
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

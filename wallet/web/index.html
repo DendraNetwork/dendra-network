@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Dendra Wallet</title>
+<meta name="description" content="A wallet for the Dendra public testnet: create a key in this browser tab, fund it from the faucet, send testnet DNDR."/>
+<style>
+  :root{
+    --bg:#060a09; --panel:#0d1614; --panel2:#111d1a; --line:#243531;
+    --text:#e7f1ec; --muted:#9bb0a8; --accent:#34d399; --accent2:#10b981;
+    --danger:#e06a5a; --warn:#e0b24a; --radius:12px;
+    --ui-font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--ui-font)}
+  a{color:var(--accent)}
+  /* 796 = a 760 px column plus the side padding: the wide diagrams are drawn for 760 units, so on a
+     desktop they show at 1:1 and line up with the cards. */
+  .wrap{max-width:796px;margin:0 auto;padding:18px 18px 60px}
+
+  /* --- Top bar -------------------------------------------------------------
+     This page is linked directly from the README and from the launch announcement, so a reader can
+     land on it first: it carries links to the rest of the site itself, rather than leaving the
+     browser's Back button as the only way out. Same siblings, same order as every other page; the
+     wallet leaves itself out.
+     These links navigate AWAY from a page that can have a recovery phrase on screen. What that
+     costs, and what pays for it, is at the `pagehide`/`pageshow` handlers in the script.
+     The mobile drawer is a <details>: it opens without any script, because this page may run only
+     the one inline script its policy names by digest. */
+  .top{position:relative;display:flex;align-items:center;gap:12px;padding:4px 0 12px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:9px;flex:none;min-height:44px;color:var(--text);text-decoration:none;font-weight:700;font-size:17px}
+  .brand svg{width:28px;height:28px}
+  .brand .tk{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+  .sitenav{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 16px;margin-left:auto;font-size:13.5px;min-width:0}
+  .sitenav a{color:var(--muted);text-decoration:none;padding:6px 0}
+  .sitenav a:hover{color:var(--text);text-decoration:underline}
+  .sitenav a.cta{color:#04130d;background:linear-gradient(120deg,var(--accent),var(--accent2));padding:7px 12px;border-radius:9px;font-weight:600;text-decoration:none}
+  #mobilemenu{display:none;margin-left:auto}
+  .navtoggle{list-style:none;cursor:pointer;min-width:44px;min-height:44px;display:grid;place-items:center;font-size:22px;color:var(--text);border-radius:9px}
+  .navtoggle::-webkit-details-marker{display:none}
+  .navtoggle::marker{content:""}
+  /* The panel reuses `.wrap` so that a drawer check finds its background. It comes AFTER the page's
+     own `.wrap` in document order, and it has to: the script prepends its library-failure banner to
+     the FIRST `.wrap` of the document. */
+  #mobilemenu .wrap{position:absolute;left:0;right:0;top:100%;z-index:30;max-width:none;margin:0;padding:8px 16px;display:grid;gap:2px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 34px rgba(0,0,0,.5)}
+  #mobilemenu .wrap a{min-height:44px;display:flex;align-items:center;color:var(--accent);text-decoration:none;font-size:15px}
+  /* The library-failure banner names a file path, one unbreakable token: without this it widens a
+     phone page. Only the banner can match: the page's own first child is the <header>, the drawer's
+     is a link. */
+  .wrap>div:first-child{overflow-wrap:anywhere}
+  /* A closed <details> still lays its content out for geometry queries in Chromium: without this
+     rule the closed drawer's links report boxes past the right edge of a phone screen. */
+  #mobilemenu:not([open]) .wrap{display:none}
+  @media(max-width:760px){
+    .sitenav{display:none}
+    #mobilemenu{display:block}
+  }
+
+  /* --- Page ----------------------------------------------------------------- */
+  h1{font-size:27px;line-height:1.2;margin:22px 0 8px;font-weight:800}
+  .lead{margin:0 0 10px;color:var(--muted);font-size:16px}
+  .chain{margin:0;font-size:13px;color:var(--muted)}
+  .pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--text);font-size:12.5px;overflow-wrap:anywhere}
+  .facts{list-style:none;margin:16px 0 8px;padding:12px 14px;display:grid;gap:9px;background:#2a1f14;border:1px solid #5a3d16;border-radius:10px;color:#f0c48a;font-size:13.5px}
+  .facts li{display:grid;grid-template-columns:14px minmax(0,1fr);gap:8px}
+  .facts li::before{content:"";width:8px;height:8px;margin-top:7px;border-radius:50%;background:var(--warn)}
+  .facts b{color:#f6d9a6}
+  h2.sh{font-size:17px;margin:28px 0 10px;font-weight:700}
+  .fig{margin:0 0 6px}
+  .notice{background:var(--panel2);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:#f0c48a;margin:12px 0 0}
+  .seedwarn{color:var(--warn);font-size:13px;margin:0 0 8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin:16px 0}
+  .card h2{display:flex;align-items:center;gap:10px;font-size:17px;margin:0 0 12px;font-weight:700}
+  .n{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid var(--accent);color:var(--accent);display:grid;place-items:center;font-size:13px;font-weight:700}
+  .rules{margin:0 0 14px;font-size:13.5px;color:var(--muted)}
+  .rules b{color:var(--text)}
+  .todo{margin:10px 0 0;padding-left:22px;font-size:14px}
+  .todo li+li{margin-top:6px}
+  .hint{color:var(--muted);font-size:13px;margin:10px 0 0}
+  label,.lbl{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 5px}
+  input,textarea,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:10px 12px;font:inherit;font-size:14px}
+  textarea{resize:vertical;min-height:64px;font-family:var(--mono);font-size:13px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:0}
+  .row>.fit{flex:0 0 auto}
+  button{cursor:pointer;min-height:44px;border:0;border-radius:9px;padding:10px 14px;font:inherit;font-weight:600;font-size:14px;background:linear-gradient(120deg,var(--accent),var(--accent2));color:#04130d;box-shadow:0 6px 22px -12px var(--accent)}
+  button.sec{background:var(--panel2);color:var(--text);border:1px solid var(--line);box-shadow:none}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);box-shadow:none}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .mono{font-family:var(--mono)}
+  /* A command option must not wrap at its own hyphens: "-" then "-address" is not what to type. */
+  .nobr{white-space:nowrap}
+  .addr{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-family:var(--mono);font-size:13px;word-break:break-all}
+  .bal{font-size:30px;font-weight:800;margin:4px 0}
+  .bal small{font-size:15px;color:var(--muted);font-weight:600}
+  .muted{color:var(--muted)}
+  .hidden{display:none}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;max-width:90%;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  .toast.ok{border-color:var(--accent2)} .toast.err{border-color:var(--danger)}
+  .mnem{background:var(--panel2);border:1px dashed var(--warn);border-radius:10px;padding:12px;font-family:var(--mono);font-size:13px;line-height:1.9;word-spacing:6px}
+  .k{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .k>*{min-width:0}
+  .k>:last-child{margin-left:auto;text-align:right;overflow-wrap:anywhere}
+  /* A transaction hash or the chain's rawLog is one unbreakable token. */
+  #sendInfo{overflow-wrap:anywhere}
+  .k:last-child{border:0}
+  .small{font-size:12px}
+  .mt8{margin-top:8px} .mt10{margin-top:10px} .mt12{margin-top:12px} .mt18{margin-top:18px}
+  details.cmd{margin-top:12px;border:1px solid var(--line);border-radius:9px;padding:0 12px}
+  details.cmd>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600;font-size:14px;color:var(--accent)}
+  details.cmd[open]{padding-bottom:12px}
+  pre.code{margin:8px 0 0;padding:12px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;font:12.5px/1.5 var(--mono);white-space:pre;overflow-x:auto;max-width:100%}
+  details.adv>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700;font-size:15px}
+  details.adv[open]>summary{margin-bottom:4px}
+  details.cmd>summary,details.adv>summary{list-style:none}
+  details.cmd>summary::-webkit-details-marker,details.adv>summary::-webkit-details-marker{display:none}
+  details.cmd>summary::before,details.adv>summary::before{content:"▸";flex:none;width:1em;margin-right:6px;color:var(--accent);transition:transform .15s}
+  details.cmd[open]>summary::before,details.adv[open]>summary::before{transform:rotate(90deg)}
+  .sub{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+  .sub h3{font-size:14px;margin:0 0 6px}
+  .golink{align-self:center;font-size:13.5px;padding:12px 0}
+  footer{color:var(--muted);font-size:12px;text-align:center;margin-top:26px}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+  /* --- Diagrams: the site's shared class contract, mapped to this page's variables ---------------
+     (--txt is --text here, --acc is --accent). Order matters: the fill and family rules come after
+     dg-t / dg-m, since a text carries two classes of equal specificity. No style attribute, no
+     <style> and no reference inside the svg: colour comes only from these classes. */
+  .dg{width:100%;height:auto}
+  .dg .dg-box{fill:var(--panel);stroke:var(--line);stroke-width:1.2}
+  .dg .dg-t{fill:var(--text);font:600 13px var(--ui-font)}
+  .dg .dg-m{fill:var(--muted);font:400 12px var(--ui-font)}
+  .dg .dg-mono{font-family:var(--mono)}
+  .dg .dg-acc{stroke:var(--accent);fill:none;stroke-width:1.6}
+  .dg .dg-accf{fill:var(--accent)}
+  .dg .dg-warn{stroke:var(--warn);fill:none}
+  .dg .dg-warnf{fill:var(--warn)}
+  .dg .dg-bad{stroke:var(--danger);fill:none}
+  .dg .dg-badf{fill:var(--danger)}
+  .dg .dg-dash{stroke-dasharray:4 4}
+  .dg-wide{display:block}
+  .dg-narrow{display:none}
+  @media(max-width:640px){.dg-wide{display:none}.dg-narrow{display:block}}
+  /* Page decision, on top of the contract: keep diagram text at 12-13 px at every width. The wide
+     variants are drawn for a 760-unit box, so they show only once the column is about 760 px wide,
+     inside the same edges as the cards; below that the narrow variant shows, capped so its text
+     does not balloon on a tablet. */
+  @media(max-width:789px){.fig .dg-wide{display:none}.fig .dg-narrow{display:block;max-width:420px;margin:0 auto}}
+  /* A jump link past the introduction, to the first card on screen (step 1, or step 2 once a wallet
+     is open: step 1 is hidden then). */
+  .jump{display:inline-flex;align-items:center;min-height:44px;font-size:14px;font-weight:600;text-decoration:none}
+
+  /* --- Mobile -------------------------------------------------------------
+     `.row>*{flex:1;min-width:0}` left about 144px per field at 375px, so endpoint URLs were
+     truncated and the two fields sat on different baselines whenever one label wrapped and the
+     other did not. Stack them instead.
+
+     Fields must be at least 16px: below that, iOS Safari zooms the page on
+     focus and does not zoom back out, leaving the reader stuck inside an
+     enlarged page while typing an address. That is browser behaviour triggered
+     at the pixel, not a typographic preference. */
+  @media(max-width:640px){
+    .row{flex-direction:column;gap:12px}
+    .row>*{width:100%}
+    input,textarea,select{font-size:16px}
+    button{font-size:15px}
+    .wrap{padding:12px 16px 48px}
+    h1{font-size:24px}
+  }
+
+  /* Discord, at the top of every page (owner's request, 2026-10-07): the mark and the word, the mark alone
+     where the bar is narrow. */
+  .dc{display:inline-flex;align-items:center;gap:6px}
+  .dc svg{width:18px;height:18px;flex:none;fill:#5865F2}
+  @media(max-width:1100px){.dc .dcw{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="../index.html" aria-label="Dendra home">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 2v28M16 12 7 7M16 12l9-5M16 20l-7 4M16 20l7 4" stroke="#34d399" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="2.5" r="2.5" fill="#34d399"/><circle cx="7" cy="7" r="2.2" fill="#10b981"/><circle cx="25" cy="7" r="2.2" fill="#10b981"/><circle cx="9" cy="24" r="2.2" fill="#10b981"/><circle cx="23" cy="24" r="2.2" fill="#10b981"/></svg>
+      Dendra <span class="tk">Wallet</span>
+    </a>
+    <nav class="sitenav" aria-label="Dendra">
+      <a href="../index.html">Home</a>
+      <a href="../docs/index.html">Docs</a>
+      <a href="../litepaper/index.html">Litepaper</a>
+      <a href="../network/index.html">Explorer</a>
+      <a href="../final-season/index.html">Final Testnet Season</a>
+      <a href="../roadmap/index.html">Roadmap</a>
+      <a class="dc" href="https://discord.gg/bFc4kqBXW4" target="_blank" rel="noopener" aria-label="Discord" title="Join the Dendra Discord"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .078-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127c-.598.35-1.22.645-1.873.891a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg><span class="dcw">Discord</span></a>
+      <a class="cta" href="../chat/index.html">Open the chat →</a>
+    </nav>
+    <!-- Same list, same order, same labels as the bar above. -->
+    <details id="mobilemenu">
+      <summary class="navtoggle" id="navtoggle" aria-label="Menu">☰</summary>
+      <div class="wrap">
+        <a href="../index.html">Home</a>
+        <a href="../docs/index.html">Docs</a>
+        <a href="../litepaper/index.html">Litepaper</a>
+        <a href="../network/index.html">Explorer</a>
+        <a href="../final-season/index.html">Final Testnet Season</a>
+        <a href="../roadmap/index.html">Roadmap</a>
+        <a href="https://discord.gg/bFc4kqBXW4" target="_blank" rel="noopener">Discord ↗</a>
+        <a href="../chat/index.html">Open the chat →</a>
+      </div>
+    </details>
+  </header>
+
+  <h1>Testnet wallet</h1>
+  <p class="lead">Make a wallet in this browser tab and fund it with free testnet DNDR. Then send DNDR, or have a miner's Final Testnet Season rewards paid to this wallet.</p>
+  <p class="chain">Chain: <span class="pill mono" id="netLabel">testnet</span></p>
+  <a class="jump" href="#start">Go to the wallet ↓</a>
+
+  <!-- The testnet and token facts are stated ONCE on this page, here. -->
+  <ul class="facts">
+    <li><span><b>Testnet only.</b> DNDR is Dendra's utility token, used to pay for AI answers and reward the miners who compute them. There is no token sale, presale or ICO. On <b>dendra-testnet</b>, a public testnet, it is free and <b>never sold</b>.</span></li>
+    <li><span><b>Resettable.</b> A reset erases every balance, yours included. The published Final Testnet Season rankings are archived first.</span></li>
+    <li><span><b>Points come only from the season.</b> Free DNDR, or DNDR from a transfer, is not a point. Only <a href="../final-season/index.html">Final Testnet Season</a> rewards, paid by a published formula, count as points: each testnet DNDR the season paid becomes one mainnet DNDR, credited in the mainnet genesis to the address that received it; mainnet launches after the Final Testnet Season.</span></li>
+    <li><span><b>No account.</b> There is no password and no recovery service. The 24 words, your recovery phrase, are the wallet: once this tab is closed or reloaded, they are the only way back into it.</span></li>
+  </ul>
+
+  <!-- D17: the whole journey, visible before any card opens. -->
+  <section class="fig" aria-labelledby="h-how">
+    <h2 class="sh" id="h-how">How it works</h2>
+    <svg class="dg dg-wide dg-d17" viewBox="0 0 760 122" width="100%" role="img" aria-labelledby="d17w-t">
+      <title id="d17w-t">The wallet in four steps, numbered like the cards below. 1 Create: 24 random words make your key; write them on paper now. 2 Your address: it starts with dendra1; copy it. 3 Fund: free testnet DNDR from the faucet. 4 Use it: send DNDR, or receive a miner's season rewards at this address.</title>
+      <defs>
+        <marker id="d17w-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="dg-accf"/></marker>
+      </defs>
+      <rect class="dg-box" x="1" y="8" width="172" height="106" rx="10"/>
+      <rect class="dg-warn" x="1" y="8" width="172" height="106" rx="10" stroke-width="1.6"/>
+      <circle class="dg-warn" cx="23" cy="36" r="12" stroke-width="1.6"/>
+      <text class="dg-t dg-warnf" x="23" y="41" text-anchor="middle">1</text>
+      <text class="dg-t" x="41" y="41">Create</text>
+      <text class="dg-m" x="15" y="68">24 random words make</text>
+      <text class="dg-m" x="15" y="86">your key: write them</text>
+      <text class="dg-m" x="15" y="104">on paper now</text>
+      <line class="dg-acc" x1="173" y1="36" x2="194" y2="36" marker-end="url(#d17w-ma)"/>
+      <rect class="dg-box" x="196" y="8" width="172" height="106" rx="10"/>
+      <circle class="dg-acc" cx="218" cy="36" r="12"/>
+      <text class="dg-t dg-accf" x="218" y="41" text-anchor="middle">2</text>
+      <text class="dg-t" x="236" y="41">Your address</text>
+      <text class="dg-m" x="210" y="68">starts with dendra1;</text>
+      <text class="dg-m" x="210" y="86">copy it to fund it</text>
+      <line class="dg-acc" x1="368" y1="36" x2="389" y2="36" marker-end="url(#d17w-ma)"/>
+      <rect class="dg-box" x="391" y="8" width="172" height="106" rx="10"/>
+      <circle class="dg-acc" cx="413" cy="36" r="12"/>
+      <text class="dg-t dg-accf" x="413" y="41" text-anchor="middle">3</text>
+      <text class="dg-t" x="431" y="41">Fund</text>
+      <text class="dg-m" x="405" y="68">free testnet DNDR</text>
+      <text class="dg-m" x="405" y="86">from the faucet</text>
+      <line class="dg-acc" x1="563" y1="36" x2="584" y2="36" marker-end="url(#d17w-ma)"/>
+      <rect class="dg-box" x="586" y="8" width="172" height="106" rx="10"/>
+      <rect class="dg-acc" x="586" y="8" width="172" height="106" rx="10"/>
+      <circle class="dg-acc" cx="608" cy="36" r="12"/>
+      <text class="dg-t dg-accf" x="608" y="41" text-anchor="middle">4</text>
+      <text class="dg-t" x="626" y="41">Use it</text>
+      <text class="dg-m" x="600" y="68">send DNDR, or receive</text>
+      <text class="dg-m" x="600" y="86">a miner's season</text>
+      <text class="dg-m" x="600" y="104">rewards here</text>
+    </svg>
+    <svg class="dg dg-narrow dg-d17" viewBox="0 0 340 380" width="100%" role="img" aria-labelledby="d17n-t">
+      <title id="d17n-t">The wallet in four steps, numbered like the cards below. 1 Create: 24 random words make your key; write them on paper now. 2 Your address: it starts with dendra1; copy it. 3 Fund: free testnet DNDR from the faucet. 4 Use it: send DNDR, or receive a miner's season rewards at this address.</title>
+      <defs>
+        <marker id="d17n-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="dg-accf"/></marker>
+      </defs>
+      <rect class="dg-box" x="20" y="8" width="300" height="82" rx="10"/>
+      <rect class="dg-warn" x="20" y="8" width="300" height="82" rx="10" stroke-width="1.6"/>
+      <circle class="dg-warn" cx="44" cy="34" r="12" stroke-width="1.6"/>
+      <text class="dg-t dg-warnf" x="44" y="39" text-anchor="middle">1</text>
+      <text class="dg-t" x="66" y="39">Create</text>
+      <text class="dg-m" x="66" y="60">24 random words make your key.</text>
+      <text class="dg-m" x="66" y="78">Write them on paper now.</text>
+      <line class="dg-acc" x1="44" y1="90" x2="44" y2="112" marker-end="url(#d17n-ma)"/>
+      <rect class="dg-box" x="20" y="114" width="300" height="64" rx="10"/>
+      <circle class="dg-acc" cx="44" cy="140" r="12"/>
+      <text class="dg-t dg-accf" x="44" y="145" text-anchor="middle">2</text>
+      <text class="dg-t" x="66" y="145">Your address</text>
+      <text class="dg-m" x="66" y="166">starts with dendra1; copy it</text>
+      <line class="dg-acc" x1="44" y1="178" x2="44" y2="200" marker-end="url(#d17n-ma)"/>
+      <rect class="dg-box" x="20" y="202" width="300" height="64" rx="10"/>
+      <circle class="dg-acc" cx="44" cy="228" r="12"/>
+      <text class="dg-t dg-accf" x="44" y="233" text-anchor="middle">3</text>
+      <text class="dg-t" x="66" y="233">Fund</text>
+      <text class="dg-m" x="66" y="254">free testnet DNDR from the faucet</text>
+      <line class="dg-acc" x1="44" y1="266" x2="44" y2="288" marker-end="url(#d17n-ma)"/>
+      <rect class="dg-box" x="20" y="290" width="300" height="82" rx="10"/>
+      <rect class="dg-acc" x="20" y="290" width="300" height="82" rx="10"/>
+      <circle class="dg-acc" cx="44" cy="316" r="12"/>
+      <text class="dg-t dg-accf" x="44" y="321" text-anchor="middle">4</text>
+      <text class="dg-t" x="66" y="321">Use it</text>
+      <text class="dg-m" x="66" y="342">send DNDR, or receive a miner's</text>
+      <text class="dg-m" x="66" y="360">season rewards at this address</text>
+    </svg>
+    <ol class="sr-only">
+      <li>Create: 24 random words make your key. Write them on paper now.</li>
+      <li>Your address: it starts with dendra1. Copy it.</li>
+      <li>Fund it with free testnet DNDR from the faucet.</li>
+      <li>Use it: send DNDR, or receive a miner's season rewards at this address.</li>
+    </ol>
+  </section>
+
+  <!-- Target of the jump link at the top. Empty, so it lands on the first card on screen: step 1, or
+       step 2 once a wallet is open. -->
+  <div id="start"></div>
+
+  <!-- STEP 1 -->
+  <div class="card" id="connectCard">
+    <h2><span class="n">1</span>Create or restore</h2>
+    <p class="rules"><b>Create a fresh wallet here.</b> Never restore 24 words you use anywhere else,
+      even for a wallet that is empty today. They control every wallet made from them, on any chain,
+      now and later. A testnet page is no place to type them.</p>
+    <div class="row">
+      <button id="btnCreate">Create new wallet</button>
+      <button class="sec" id="btnImportToggle">Restore from my 24 words</button>
+    </div>
+    <div id="importBox" class="hidden">
+      <label for="mnemonicIn">Your 24-word recovery phrase (mnemonic)</label>
+      <!-- A spell checker uploads what is typed here to a remote service, and an autofill store
+           keeps it after the tab is closed: both must be off on the one field that holds a seed. -->
+      <textarea id="mnemonicIn" spellcheck="false" autocomplete="off" autocorrect="off"
+                autocapitalize="off" placeholder="word1 word2 ... word24"></textarea>
+      <div class="mt8"><button id="btnImport">Open wallet</button></div>
+    </div>
+    <div id="createBox" class="hidden">
+      <div class="lbl">Your new recovery phrase (mnemonic)</div>
+      <!-- The rule is stated BEFORE it applies, not after it has bitten: the wipe below is bound to
+           leaving the page, and a reader who follows any link on the page has to know that
+           beforehand. Switching to another window does NOT clear it — that is how one writes a
+           phrase down. -->
+      <div class="seedwarn">Write these words on paper now. Leaving this page (any link, or Back)
+        clears them, but this page does not clear them when you switch to another window or tab.
+        If they are cleared, nothing is lost: no wallet exists yet, so a new phrase is one click away.</div>
+      <div class="mnem" id="mnemonicOut"></div>
+      <div class="row mt10">
+        <button class="sec" id="btnCopyMnem">Copy</button>
+        <button id="btnConfirmCreate">I saved it — open wallet</button>
+      </div>
+    </div>
+    <!-- Outside the two boxes on purpose: the wipe hides them, so a message placed inside would be
+         hidden by the very event it exists to explain. -->
+    <div id="seedGone" class="notice hidden">This page was left, so the phrase it showed was
+      cleared. No wallet was opened from it: click “Create new wallet” again, or restore the words
+      you wrote down.</div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="card hidden" id="accountCard">
+    <h2><span class="n">2</span>Your address and balance</h2>
+    <div class="lbl">Address</div>
+    <div class="addr" id="address">—</div>
+    <div class="row mt8">
+      <button class="sec" id="btnCopyAddr">Copy address</button>
+      <button class="ghost" id="btnRefresh">Refresh balance</button>
+      <button class="ghost" id="btnLock">Lock</button>
+    </div>
+    <div class="mt18">
+      <div class="lbl">Balance</div>
+      <!-- Before the first query nothing has been measured: the placeholder must not read as a zero balance. -->
+      <div class="bal"><span id="balDNDR">?</span> <small>DNDR</small></div>
+      <div class="muted small mono" id="balMicro">? udndr</div>
+    </div>
+    <p class="hint">1 DNDR = 1,000,000 udndr, the unit the chain counts. “?” means the balance has not
+      been read yet; it does not mean zero. <b>Lock</b> forgets this wallet in this tab.</p>
+    <!-- Here, not above the first button: the address it tells a miner to declare exists only now. -->
+    <p class="hint">Running a miner? It funds its own key and does not need this wallet. To receive its
+      season rewards at this address instead, declare it in the Dendra app or with
+      <span class="mono"><span class="nobr">final_season_miner.py</span> <span class="nobr">payout --address</span></span>.
+      <a href="../final-season/index.html#caps">How payouts work →</a></p>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="card hidden" id="faucetCard">
+    <h2><span class="n">3</span>Get free testnet DNDR</h2>
+    <p class="hint">A new wallet holds nothing. The public faucet gives free testnet DNDR for a short
+      computation your computer runs (a proof-of-work), which makes mass claims costly. It runs in a
+      terminal, not on this page.</p>
+    <ol class="todo">
+      <li>Copy your address (step 2).</li>
+      <li>Use a terminal on Linux or macOS, or the WSL Linux terminal on Windows (not PowerShell),
+        with curl and Python 3. Open the command below and run its curl line alone: it prints the
+        amount and the difficulty (<span class="mono">pow_bits</span>). Then put your address in
+        <span class="mono">ADDR</span> and that number in <span class="mono">BITS</span>, and run the
+        rest.</li>
+      <li>Refresh the balance and trust it, not the faucet's reply: the faucet uses plain HTTP, so
+        its reply is not authenticated.</li>
+    </ol>
+    <details class="cmd">
+      <summary>Show the command</summary>
+      <div class="k"><span class="muted">Faucet</span><span class="mono" id="faucetUrl">http://testnet-api.dendranetwork.com:4500</span></div>
+      <pre class="code"># 1. Run this line alone: it prints the amount and pow_bits.
+curl -s http://testnet-api.dendranetwork.com:4500/
+# 2. Set ADDR and BITS below, then run the rest.
+python3 - &lt;&lt;'EOF'
+import hashlib, itertools, json, urllib.request
+ADDR = "dendra1..."          # your address, copied above
+BITS = 20                    # pow_bits, as reported by the line above
+for n in itertools.count():
+    h = hashlib.sha256(("%s:%d" % (ADDR, n)).encode()).digest()
+    if int.from_bytes(h, "big") &gt;&gt; (256 - BITS) == 0:
+        break
+req = urllib.request.Request("http://testnet-api.dendranetwork.com:4500/",
+    json.dumps({"address": ADDR, "pow": str(n)}).encode(),
+    {"Content-Type": "application/json"})
+print(urllib.request.urlopen(req).read().decode())
+EOF</pre>
+    </details>
+    <p class="hint">Only a public address and a number travel to the faucet. A refusal says why;
+      the limits are in the <a href="../docs/index.html#faucet">Docs</a>.</p>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="card hidden" id="sendCard">
+    <h2><span class="n">4</span>Send DNDR</h2>
+    <label for="to">Recipient address (starts with dendra1)</label>
+    <input id="to" class="mono" placeholder="dendra1..."/>
+    <div class="row mt8">
+      <div><label for="amount">Amount (DNDR)</label><input id="amount" inputmode="decimal" placeholder="0.0"/></div>
+      <div><label for="memo">Memo (optional)</label><input id="memo" placeholder=""/></div>
+    </div>
+    <p class="hint">The memo is written on the chain: public and permanent. An address can send
+      only after it has received DNDR.</p>
+    <div class="k mt10"><span class="muted">Signs for chain-id</span><span class="mono" id="sendChain">?</span></div>
+    <p class="hint">The chain-id names the network; this page reads it from the chain endpoint, the
+      server it talks to. A transfer is signed for that network only: while it shows “?”, Send is
+      refused.</p>
+    <div class="mt12"><button id="btnSend">Send</button></div>
+    <div class="muted small mt8" id="sendInfo"></div>
+  </div>
+
+  <!-- D18: what the wallet sends. Outside every card and after step 4: before a wallet opens it
+       follows step 1 (steps 2-4 are hidden then), and once one is open it stays on screen after the
+       step that signs, without pushing the address card down. -->
+  <section class="fig" aria-labelledby="h-leaves">
+    <h2 class="sh" id="h-leaves">What your wallet sends</h2>
+    <svg class="dg dg-wide dg-d18" viewBox="0 0 760 254" width="100%" role="img" aria-labelledby="d18w-t">
+      <title id="d18w-t">Inside this browser tab, the 24 words make the private key, and the key signs each transfer. Only these go to the chain endpoint: your address, your public key, and each transfer, sent once unsigned to estimate its fee, then signed. None of them is secret. The chain checks each signature. The 24 words and the private key are never sent. The Copy button puts the words in your system clipboard, which this page cannot clear.</title>
+      <defs>
+        <marker id="d18w-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="dg-accf"/></marker>
+      </defs>
+      <rect class="dg-box" x="4" y="8" width="456" height="184" rx="14"/>
+      <rect class="dg-acc" x="4" y="8" width="456" height="184" rx="14"/>
+      <text class="dg-t" x="22" y="33">This browser tab</text>
+      <rect class="dg-box" x="20" y="50" width="124" height="56" rx="9"/>
+      <text class="dg-t" x="82" y="74" text-anchor="middle">24 words</text>
+      <text class="dg-m" x="82" y="94" text-anchor="middle">recovery phrase</text>
+      <line class="dg-acc" x1="144" y1="78" x2="166" y2="78" marker-end="url(#d18w-ma)"/>
+      <rect class="dg-box" x="168" y="50" width="124" height="56" rx="9"/>
+      <text class="dg-t" x="230" y="74" text-anchor="middle">Private key</text>
+      <text class="dg-m" x="230" y="94" text-anchor="middle">made from them</text>
+      <line class="dg-acc" x1="292" y1="78" x2="314" y2="78" marker-end="url(#d18w-ma)"/>
+      <rect class="dg-box" x="316" y="50" width="124" height="56" rx="9"/>
+      <text class="dg-t" x="378" y="74" text-anchor="middle">Signature</text>
+      <text class="dg-m" x="378" y="94" text-anchor="middle">on each transfer</text>
+      <text class="dg-m" x="22" y="146">The 24 words and the private key are never sent.</text>
+      <line class="dg-bad dg-dash" x1="22" y1="164" x2="446" y2="164"/>
+      <line class="dg-bad" x1="452" y1="156" x2="468" y2="172" stroke-width="2"/>
+      <line class="dg-bad" x1="452" y1="172" x2="468" y2="156" stroke-width="2"/>
+      <line class="dg-acc" x1="440" y1="78" x2="548" y2="78" marker-end="url(#d18w-ma)"/>
+      <text class="dg-m" x="497" y="68" text-anchor="middle">sends</text>
+      <rect class="dg-box" x="550" y="44" width="206" height="78" rx="10"/>
+      <text class="dg-t" x="653" y="68" text-anchor="middle">Chain endpoint (RPC)</text>
+      <text class="dg-m" x="653" y="88" text-anchor="middle">gets your address, public</text>
+      <text class="dg-m" x="653" y="106" text-anchor="middle">key and each transfer</text>
+      <line class="dg-acc" x1="653" y1="122" x2="653" y2="146" marker-end="url(#d18w-ma)"/>
+      <rect class="dg-box" x="550" y="148" width="206" height="56" rx="10"/>
+      <text class="dg-t" x="653" y="172" text-anchor="middle">dendra-testnet</text>
+      <text class="dg-m" x="653" y="192" text-anchor="middle">checks each signature</text>
+      <rect class="dg-warn dg-dash" x="4" y="216" width="752" height="32" rx="10"/>
+      <text class="dg-m" x="380" y="237" text-anchor="middle">The Copy button puts the words in your system clipboard, which this page cannot clear.</text>
+    </svg>
+    <svg class="dg dg-narrow dg-d18" viewBox="0 0 340 568" width="100%" role="img" aria-labelledby="d18n-t">
+      <title id="d18n-t">Inside this browser tab, the 24 words make the private key, and the key signs each transfer. Only these go to the chain endpoint: your address, your public key, and each transfer, sent once unsigned to estimate its fee, then signed. None of them is secret. The chain checks each signature. The 24 words and the private key are never sent. The Copy button puts the words in your system clipboard, which this page cannot clear.</title>
+      <defs>
+        <marker id="d18n-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="dg-accf"/></marker>
+      </defs>
+      <rect class="dg-box" x="4" y="8" width="332" height="280" rx="14"/>
+      <rect class="dg-acc" x="4" y="8" width="332" height="280" rx="14"/>
+      <text class="dg-t" x="20" y="32">This browser tab</text>
+      <rect class="dg-box" x="20" y="46" width="300" height="50" rx="9"/>
+      <text class="dg-t" x="36" y="67">24 words</text>
+      <text class="dg-m" x="36" y="86">your recovery phrase</text>
+      <line class="dg-acc" x1="170" y1="96" x2="170" y2="116" marker-end="url(#d18n-ma)"/>
+      <rect class="dg-box" x="20" y="118" width="300" height="50" rx="9"/>
+      <text class="dg-t" x="36" y="139">Private key</text>
+      <text class="dg-m" x="36" y="158">made from the 24 words</text>
+      <line class="dg-acc" x1="170" y1="168" x2="170" y2="188" marker-end="url(#d18n-ma)"/>
+      <rect class="dg-box" x="20" y="190" width="300" height="50" rx="9"/>
+      <text class="dg-t" x="36" y="211">Signature</text>
+      <text class="dg-m" x="36" y="230">made for each transfer</text>
+      <line class="dg-bad" x1="24" y1="256" x2="36" y2="268" stroke-width="2"/>
+      <line class="dg-bad" x1="24" y1="268" x2="36" y2="256" stroke-width="2"/>
+      <text class="dg-m" x="46" y="266">words and key: never sent</text>
+      <line class="dg-acc" x1="300" y1="240" x2="300" y2="334" marker-end="url(#d18n-ma)"/>
+      <text class="dg-m" x="290" y="314" text-anchor="end">sends</text>
+      <rect class="dg-box" x="20" y="336" width="300" height="68" rx="10"/>
+      <text class="dg-t" x="36" y="358">Chain endpoint (RPC)</text>
+      <text class="dg-m" x="36" y="378">gets your address, public key</text>
+      <text class="dg-m" x="36" y="396">and each transfer</text>
+      <line class="dg-acc" x1="170" y1="404" x2="170" y2="426" marker-end="url(#d18n-ma)"/>
+      <rect class="dg-box" x="20" y="428" width="300" height="50" rx="10"/>
+      <text class="dg-t" x="36" y="449">dendra-testnet</text>
+      <text class="dg-m" x="36" y="468">checks each signature</text>
+      <rect class="dg-warn dg-dash" x="4" y="494" width="332" height="66" rx="10"/>
+      <text class="dg-m" x="20" y="516">The Copy button puts the words in</text>
+      <text class="dg-m" x="20" y="534">your system clipboard, which this</text>
+      <text class="dg-m" x="20" y="552">page cannot clear.</text>
+    </svg>
+    <ol class="sr-only">
+      <li>Inside this browser tab, the 24 words make the private key, and the key signs each transfer.</li>
+      <li>Only these go to the chain endpoint (RPC): your address, your public key, and each transfer, sent once unsigned to estimate its fee, then signed. None of them is secret.</li>
+      <li>The dendra-testnet chain checks each signature.</li>
+      <li>The 24 words and the private key are never sent.</li>
+      <li>The Copy button puts the words in your system clipboard, which this page cannot clear.</li>
+    </ol>
+  </section>
+
+  <!-- ADVANCED: the endpoints, the chain-id read, and the read-only network view. Collapsed: the
+       defaults point at the public network, and almost nobody has to change them. -->
+  <details class="card adv">
+    <summary>Advanced: network</summary>
+    <p class="hint">Preset to the public network. Change these only to use your own node.</p>
+    <div class="row">
+      <div>
+        <label for="rpc">Chain endpoint (RPC)</label>
+        <input id="rpc" value="https://testnet-api.dendranetwork.com/rpc"/>
+      </div>
+      <div>
+        <label for="rest">Query endpoint (REST)</label>
+        <input id="rest" value="https://testnet-api.dendranetwork.com/rest"/>
+      </div>
+    </div>
+    <div class="row mt10">
+      <div class="fit"><button class="sec" id="btnPing">Test connection</button></div>
+      <div><div class="addr small" id="netStatus">not tested yet</div></div>
+    </div>
+    <!-- The chain-id is part of what gets signed, and it is not written in this page: it is read from
+         the RPC endpoint above and shown here, so the reader sees which chain a signature is for
+         before giving one. "?" means not read — never a default. -->
+    <div class="k mt12"><span class="muted">Chain-id this page signs for</span><span class="mono" id="chainId">?</span></div>
+    <p class="hint">Editing the chain endpoint clears the chain-id until it is read again.</p>
+    <!-- DENDRA (read-only network view) -->
+    <div class="sub hidden" id="dendraCard">
+      <h3>Chain at a glance, live from the query endpoint</h3>
+      <div class="k"><span class="muted">Total supply</span><span class="mono" id="supply">—</span></div>
+      <div class="k"><span class="muted">Registered miners</span><span class="mono" id="miners">—</span></div>
+      <div class="k"><span class="muted">Checking mode · jury quorum</span><span class="mono" id="vmode">—</span></div>
+      <p class="hint">Checking mode
+        (<span class="mono">verification_mode</span>): at 0, several miners answer each job and are
+        compared. At 1, one miner answers, and a sample of jobs is audited by a jury of miners
+        other than the one under audit. Jury quorum
+        (<span class="mono">audit_min_quorum</span>): the fewest jurors who must vote for a verdict;
+        0 selects a default compiled into the chain.</p>
+      <div class="row mt10">
+        <div class="fit"><button class="ghost" id="btnNet">Refresh</button></div>
+        <a class="golink" href="../network/index.html">Full live state: Explorer →</a>
+      </div>
+    </div>
+  </details>
+
+  <footer>
+    Dendra Wallet · testnet · open source, Apache-2.0 ·
+    <a href="https://github.com/DendraNetwork/dendra-network">source code</a>
+  </footer>
+</div>
+
+<script type="module">
+// CosmJS is served from this site, never from a third-party CDN. This page is where a recovery
+// phrase is typed, and a dynamic `import()` accepts no `integrity` attribute — a CDN able to serve
+// different bytes on any load would run them next to the seed, unchecked. The bundle in `vendor/` is
+// self-contained (no remote import survives inside it) and is produced by `wallet/build-vendor.sh`
+// from a committed lockfile, so its SHA-256 is reproducible by a third party.
+// The import stays dynamic so a load failure shows an explicit banner rather than a silently broken
+// page; top-level await holds the handlers below until the library is ready.
+let DirectSecp256k1HdWallet, SigningStargateClient, StargateClient, GasPrice;
+try {
+  ({ DirectSecp256k1HdWallet, SigningStargateClient, StargateClient, GasPrice } =
+    await import("./vendor/cosmjs-0.39.0.js"));
+} catch (e) {
+  const detail = (e && e.message) || e;
+  const banner = document.createElement("div");
+  banner.style.cssText = "background:#7f1d1d;color:#fff;padding:14px 16px;margin:0 0 16px;border-radius:10px;font-size:14px;line-height:1.45";
+  banner.textContent = "Failed to load the wallet crypto library (vendor/cosmjs-0.39.0.js). Serve this page over HTTP rather than opening the file directly, and check that vendor/ was deployed alongside it. Details: " + detail;
+  (document.querySelector(".wrap") || document.body).prepend(banner);
+  const st = document.getElementById("netStatus"); if (st) st.textContent = "library not loaded";
+  throw e;
+}
+
+// NO CHAIN-ID IS WRITTEN HERE, on purpose. It is part of what gets signed, so a value fixed in this
+// page signs for one chain only: the day the network restarts under a new id, every send is refused
+// by the chain, and a page that knew only the old id keeps offering to sign for it. The chain-id is
+// READ from the configured RPC endpoint and SHOWN before anything is signed — `readChainId`,
+// `showChainId` and `assertChainId` below.
+const CFG = { prefix:"dendra", denom:"udndr", display:"DNDR", decimals:6, gasPrice:"0udndr" };
+const $ = id => document.getElementById(id);
+let wallet=null, address=null, signer=null;
+
+// THE ZERO RULE. proto3 omits a field that holds its zero value, so in the chain's JSON "field
+// absent" and "field at zero" are the same bytes. Two consequences, applied everywhere below:
+//   · reading defaults to the ZERO OF THE TYPE (uint→0, repeated→[]) — an absent field is a known
+//     fact, not a missing one: a wallet holding nothing must read 0, never an error;
+//   · a FAILED query gets a DISTINCT sentinel — "not measurable" is not "measured zero". Showing
+//     0 for an unreachable endpoint invents a measurement the page never made.
+// The sentinel is never mixed into arithmetic: it only ever reaches textContent.
+const UNKNOWN = "?";
+const zero = (v, d) => (v === undefined || v === null ? d : v);
+// A non-2xx answer is a failure, not an empty result. Without this the REST gateway's JSON error
+// body parses cleanly and every field reads as absent — i.e. as zero.
+async function getJSON(url){
+  const r = await fetch(url, {cache:"no-store"});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+
+// THE CHAIN-ID ON SCREEN. `null` = not read: never read, the read failed, or the RPC field was edited
+// since. It gets NO default — on the signing path an unread chain-id is a refusal, never a guess, and
+// a chain-id is exactly the kind of security criterion the zero rule forbids defaulting.
+const rpcURL = ()=> $("rpc").value.trim().replace(/\/+$/,"");
+let shownChainId = null;
+function showChainId(id){
+  shownChainId = id || null;
+  const txt = shownChainId || UNKNOWN;
+  $("chainId").textContent = txt;
+  $("sendChain").textContent = txt;
+  $("netLabel").textContent = shownChainId ? "testnet · "+shownChainId : "testnet";
+}
+// Reads `result.node_info.network` from the endpoint's `/status`. Every way of not obtaining a
+// non-empty string — HTTP error, malformed JSON, field absent, field empty — THROWS: proto3 would
+// render an absent string as "", and "" is not a chain anyone can sign for.
+async function readChainId(rpc){
+  const s = await getJSON(rpc+"/status");
+  const ni = s && s.result && s.result.node_info;
+  const net = ni ? ni.network : undefined;
+  if(typeof net !== "string" || net === "") throw new Error("result.node_info.network missing from "+rpc+"/status");
+  return net;
+}
+// Reads and shows. An answer for an endpoint the field no longer names is not shown: it would put
+// another endpoint's chain-id next to the URL the reader is looking at.
+async function refreshChainId(){
+  const rpc = rpcURL();
+  let id = null;
+  try{ id = await readChainId(rpc); }
+  finally{ if(rpcURL() === rpc) showChainId(id); }
+  if(rpcURL() !== rpc) throw new Error("the RPC endpoint was edited during the read");
+  return id;
+}
+// A new endpoint may be another chain: what was shown for the old one stops being shown at once.
+$("rpc").addEventListener("input", ()=> showChainId(null));
+
+function toast(msg, kind=""){ const t=document.createElement("div"); t.className="toast "+kind; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3800); }
+const toDisplay = micro => (Number(zero(micro,0))/10**CFG.decimals).toLocaleString(undefined,{maximumFractionDigits:6});
+const toMicro   = d => String(Math.round(Number(d)*10**CFG.decimals));
+
+$("btnImportToggle").onclick = ()=>{ $("importBox").classList.toggle("hidden"); $("createBox").classList.add("hidden"); };
+$("btnCreate").onclick = async ()=>{
+  const w = await DirectSecp256k1HdWallet.generate(24, { prefix:CFG.prefix });
+  $("mnemonicOut").textContent = w.mnemonic;
+  $("createBox").classList.remove("hidden"); $("importBox").classList.add("hidden");
+  $("seedGone").classList.add("hidden");
+  window.__pendingMnemonic = w.mnemonic;
+};
+// A COPY THAT WAS REFUSED MUST NOT LOOK LIKE A COPY THAT WORKED.
+// `writeText` returns a PROMISE and it rejects for ordinary reasons: no permission, an insecure
+// context, a document that is not focused. Announcing success without waiting for it told the user
+// their phrase was safely in the clipboard when it was nowhere — and a phrase believed saved is a
+// phrase not written down.
+// The success message also names the clipboard, because it is the ONE place this page cannot clear
+// (see `wipeSeedUI`): the user has to know the phrase left the page in order to deal with it.
+$("btnCopyMnem").onclick = async ()=>{
+  try {
+    await navigator.clipboard.writeText($("mnemonicOut").textContent);
+    toast("Mnemonic copied — it is now in your system clipboard, which this page cannot clear","ok");
+  } catch (e) {
+    toast("Copy REFUSED by the browser — nothing was copied. Write the 24 words down by hand.","err");
+  }
+};
+$("btnConfirmCreate").onclick = ()=>{
+  const m = window.__pendingMnemonic;
+  // The phrase does not outlive the page it was shown on, so the button that consumes it can find
+  // nothing to consume. Naming the next gesture beats handing the user the library's complaint
+  // about a mnemonic that is not a string.
+  if(!m) return toast("No phrase on this page any more — click “Create new wallet” for a new one","err");
+  openWallet(m);
+};
+$("btnImport").onclick = ()=>{ const m=$("mnemonicIn").value.trim(); if(m.split(/\s+/).length<12) return toast("Invalid mnemonic","err"); openWallet(m); };
+
+// The seed exists in three places THIS FUNCTION CAN REACH: the box that shows a freshly generated
+// phrase, the textarea where an existing one is typed, and the global that carries it from "Create"
+// to "open wallet". `hidden` is a CSS class — what a hidden card still holds is one class toggle
+// away from being on screen again, so leaving the screen must EMPTY these three, not just hide them.
+//
+// ⚠️ AND THERE IS A FOURTH THAT IT CANNOT REACH: the SYSTEM CLIPBOARD, as soon as the user presses
+// Copy. No page can clear it, no navigation ends it, and it survives this wallet being closed. It is
+// not listed here to be wiped — it cannot be — but so that this comment stops reading as an
+// exhaustive inventory. What the code can do about it is tell the user, which the Copy handler now
+// does; the rest belongs to the person holding the machine.
+function wipeSeedUI(){
+  $("mnemonicOut").textContent = "";
+  $("mnemonicIn").value = "";
+  $("createBox").classList.add("hidden");
+  $("importBox").classList.add("hidden");
+  window.__pendingMnemonic = null;
+}
+
+// LEAVING THE PAGE IS PART OF THE THREAT MODEL, AND `Lock` CANNOT COVER IT. The links at the top of
+// the page (the logo, the site navigation and the Final Testnet Season link in the banner) navigate
+// away from a page that can have 24 words on screen, and a browser does not throw a
+// navigated-away page away: it parks it in the back/forward cache, ALIVE. The Back button then
+// restores the same document — same DOM, same globals — so the phrase and `__pendingMnemonic` come
+// back exactly as they were. `Lock` is no answer there: it lives inside `accountCard`, which is
+// hidden at precisely the moment a phrase is displayed, so the one wipe gesture is unreachable when
+// it would be needed. The wipe therefore belongs to the EXIT itself, not to a button.
+//
+// THE ARBITRAGE, because it cuts both ways: erasing a phrase its owner has not written down yet is
+// a damage of its own — a mnemonic is the only way back into a wallet. It stays a SMALL damage
+// here, and the reason is specific to this moment: while these words are on screen, no wallet has
+// been opened from them — `openWallet` has not run, no address is derived, nothing can have been
+// received. Losing them costs one click on "Create new wallet". That is what makes erasing on exit
+// the cheap side of the trade, and it is why the page says so above the words rather than after.
+//
+// `visibilitychange` is deliberately NOT used. It fires on switching to another window or tab —
+// which is HOW one writes a phrase down, into a notes app or a password manager. Wiping there would
+// destroy the phrase during the very gesture the page asks for. Exit, not inattention.
+let seedWasOnScreen = false;
+const seedOnScreen = ()=> !!(window.__pendingMnemonic || $("mnemonicOut").textContent.trim() || $("mnemonicIn").value.trim());
+// `pagehide` fires on both endings — a real unload and an entry into the back/forward cache — so it
+// is the one event that covers leaving by a link, by Back, or by closing the tab. `beforeunload` and
+// `unload` are not used and must not be: they are also what makes a browser refuse to cache the page
+// at all, which would hide the restore path instead of handling it.
+addEventListener("pagehide", ()=>{ seedWasOnScreen = seedOnScreen(); wipeSeedUI(); });
+addEventListener("pageshow", (e)=>{
+  // The wipe is UNCONDITIONAL. A restore is exactly the case that must not hinge on a flag being
+  // present and read correctly, and on a first load the three places are already empty, so calling
+  // it costs nothing. `event.persisted` — true only when the document comes back from the
+  // back/forward cache — is read for the MESSAGE alone, so the page never claims to have cleared a
+  // phrase that was not there.
+  const hadSeed = seedWasOnScreen; seedWasOnScreen = false;
+  wipeSeedUI();
+  if(hadSeed && e && e.persisted === true) $("seedGone").classList.remove("hidden");
+});
+
+async function openWallet(mnemonic){
+  try{
+    signer = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, { prefix:CFG.prefix });
+    const [acct] = await signer.getAccounts();
+    address = acct.address;
+    $("address").textContent = address;
+    $("connectCard").classList.add("hidden");
+    ["accountCard","faucetCard","sendCard","dendraCard"].forEach(id=>$(id).classList.remove("hidden"));
+    wipeSeedUI();
+    toast("Wallet opened","ok");
+    // A failed chain-id read needs no toast of its own: it shows as "?" next to the Send button, and
+    // the send path re-reads and explains its refusal.
+    refreshBalance(); refreshNetwork(); refreshChainId().catch(()=>{});
+  }catch(e){
+    // The typed phrase is deliberately kept here: a refused import is usually one wrong word, and
+    // clearing 24 words would force a full retype. It stays on the connect screen the user is still
+    // looking at, and only there — `Lock` empties it, and so does leaving the page.
+    toast("Open failed: "+(e.message||e),"err");
+  }finally{
+    // A generated phrase must not outlive the attempt that consumed it, successful or not.
+    window.__pendingMnemonic = null;
+  }
+}
+// `Lock` is what one clicks when walking away from the machine. CONSTRAINT it has to meet: it hides
+// the account AND leaves the seed places empty. It calls `wipeSeedUI`, which empties the three of
+// them, and it does not reveal `createBox` or `importBox` — the connect card comes back with its
+// buttons only. A `Lock` that puts 24 words back on screen contradicts the word on the button.
+$("btnLock").onclick = ()=>{
+  signer=null; address=null;
+  ["accountCard","faucetCard","sendCard","dendraCard"].forEach(id=>$(id).classList.add("hidden"));
+  $("connectCard").classList.remove("hidden");
+  wipeSeedUI();
+  $("address").textContent = "—";
+  $("balDNDR").textContent = UNKNOWN; $("balMicro").textContent = UNKNOWN+" udndr";
+  $("sendInfo").textContent = "";
+  toast("Locked");
+};
+$("btnCopyAddr").onclick = async ()=>{
+  // Same shape as the mnemonic copy: an unawaited promise reports a success the browser never gave.
+  try { await navigator.clipboard.writeText(address); toast("Address copied","ok"); }
+  catch (e) { toast("Copy REFUSED by the browser — select the address and copy it by hand.","err"); }
+};
+
+async function refreshBalance(){
+  if(!address) return;
+  try{
+    const c = await StargateClient.connect($("rpc").value.trim());
+    const b = await c.getBalance(address, CFG.denom); c.disconnect?.();
+    // A fresh wallet holds nothing and the chain omits the amount: that is a measured zero.
+    const micro = zero(b && b.amount, "0");
+    $("balDNDR").textContent = toDisplay(micro); $("balMicro").textContent = micro+" udndr";
+  }catch(e){
+    // The previous balance must not survive a failed refresh: a stale number reads as current.
+    $("balDNDR").textContent = UNKNOWN; $("balMicro").textContent = UNKNOWN+" udndr";
+    toast("Balance unknown (RPC/CORS?): "+(e.message||e),"err");
+  }
+}
+$("btnRefresh").onclick = refreshBalance;
+
+// Written as text nodes, never as markup: the transaction hash and the chain's `rawLog` come from
+// whatever endpoint the user pointed at, and `innerHTML` would let that endpoint place an element —
+// with an inline handler — on the page that holds the seed.
+function setSendInfo(text, mono){
+  const el = $("sendInfo"); el.textContent = text;
+  if(mono){ const s=document.createElement("span"); s.className="mono"; s.textContent=mono; el.append(" ", s); }
+}
+// THE CHAIN-ID IS PART OF WHAT GETS SIGNED, so this page signs only for the one ON SCREEN. A swapped
+// endpoint would otherwise draw a valid signature for a chain the user never saw. CosmJS takes the
+// chain-id from the endpoint (`getChainId`: the same `/status` → `node_info.network`) and CACHES it on
+// the client, so the value checked here is the value `sendTokens` then signs with. It is checked
+// before `sendTokens` because that is the last moment where nothing has been signed yet. Three
+// refusals, and no fallback in any of them:
+//   · unreadable from the endpoint → refused: unknown is not a match;
+//   · nothing on screen (never read, read failed, or the field edited since) → the value just read is
+//     SHOWN and this send is refused, so the next press signs for a chain the reader has seen;
+//   · different from the one on screen → the endpoint changed chain since it was shown: same gesture.
+async function assertChainId(client, rpc){
+  let got;
+  try{ got = await client.getChainId(); }
+  catch(e){
+    if(rpcURL() === rpc) showChainId(null);
+    throw new Error("chain-id unreadable from this endpoint ("+((e && e.message)||e)+") — nothing was signed");
+  }
+  if(typeof got !== "string" || got === ""){
+    if(rpcURL() === rpc) showChainId(null);
+    throw new Error("this endpoint announces an empty chain-id — nothing was signed");
+  }
+  if(got !== shownChainId){
+    const was = shownChainId;
+    if(rpcURL() === rpc) showChainId(got);
+    throw new Error(was
+      ? "the endpoint now announces chain-id \""+got+"\", not the \""+was+"\" shown before — nothing was signed. Check the chain-id shown above the Send button, then press Send again."
+      : "the chain-id had not been shown yet. The endpoint announces \""+got+"\", now shown above the Send button — nothing was signed. Check it, then press Send again.");
+  }
+  return got;
+}
+// A broadcast that returns is not a transfer that happened. The node refusing the transaction
+// outright throws; a transaction INCLUDED IN A BLOCK and then failed comes back normally, carrying
+// a non-zero `code`. Announcing "Sent" without reading `code` asserts a success on a criterion
+// nobody evaluated — on the one action that moves money.
+// proto3 omits a zero, so an absent `code` would read as the successful one. "Success" is precisely
+// the answer that must never come from a default: a `code` that is not a readable number yields the
+// UNKNOWN sentinel instead — not a claim of failure, a refusal to claim anything — and sends the
+// reader to the two places where the outcome can actually be read (the balance, and the chain).
+function reportSend(res){
+  const hash = (res && res.transactionHash) || "";
+  const code = res && res.code;
+  if(typeof code !== "number" || !hash){
+    setSendInfo("Result "+UNKNOWN+" — the node answered but the outcome could not be read. Refresh the balance before sending again.", hash || null);
+    toast("Transfer result "+UNKNOWN,"err");
+    return;
+  }
+  if(code === 0){
+    setSendInfo("Included in a block, code 0 — tx", hash);
+    toast("Transaction included (code 0)","ok");
+  }else{
+    const rawLog = (res && res.rawLog) || "";
+    setSendInfo("FAILED ON CHAIN — code "+code+(rawLog ? " — "+rawLog : "")+" — tx", hash);
+    toast("Transaction failed on chain (code "+code+")","err");
+  }
+  refreshBalance();
+}
+$("btnSend").onclick = async ()=>{
+  const to=$("to").value.trim(), amt=$("amount").value.trim(), memo=$("memo").value;
+  if(!to.startsWith("dendra1")) return toast("Recipient must start with dendra1","err");
+  if(!(Number(amt)>0)) return toast("Enter an amount","err");
+  $("btnSend").disabled=true; $("sendInfo").textContent="Signing and broadcasting…";
+  try{
+    const rpc = rpcURL();
+    const client = await SigningStargateClient.connectWithSigner(rpc, signer, { gasPrice: GasPrice.fromString(CFG.gasPrice) });
+    await assertChainId(client, rpc);
+    const res = await client.sendTokens(address, to, [{denom:CFG.denom, amount:toMicro(amt)}], "auto", memo);
+    reportSend(res);
+  }catch(e){
+    // An address that has never received anything has no account object on chain, so signing fails
+    // before it can even read a sequence number. The library says so in its own terms ("query
+    // sequence"), which reads as a fault; it is the ordinary state of every wallet created here.
+    // Naming the cause and pointing at the faucet turns a dead end into the next step.
+    var raw = (e && e.message) || String(e);
+    var unfunded = /does not exist on chain/i.test(raw);
+    // The toast is gone in four seconds. A refusal has to stay on screen, or a transfer that never
+    // left looks exactly like one that was never attempted.
+    setSendInfo(unfunded
+      ? "Not sent: this address holds nothing yet, so there is no account on chain to send from. Fund it from the faucet above, then try again."
+      : "Not sent: "+raw);
+    toast(unfunded ? "Nothing to send yet — fund this address from the faucet above" : "Send failed", "err");
+  }
+  $("btnSend").disabled=false;
+};
+
+async function refreshNetwork(){
+  const rest = $("rest").value.trim().replace(/\/$/,"");
+  try{
+    const s = await getJSON(rest+"/cosmos/bank/v1beta1/supply/by_denom?denom="+CFG.denom);
+    $("supply").textContent = toDisplay(zero(s.amount && s.amount.amount, "0"))+" DNDR";
+  }catch{ $("supply").textContent = UNKNOWN; }
+  try{
+    const m = await getJSON(rest+"/dendra/jobs/v1/miner");
+    // An empty `repeated` is omitted: no registered miner is a count of 0, not an absence of answer.
+    $("miners").textContent = zero(m.miner, []).length;
+  }catch{ $("miners").textContent = UNKNOWN; }
+  try{
+    const p = await getJSON(rest+"/dendra/jobs/v1/params");
+    const par = zero(p.params, {});
+    // Mode 0 and quorum 0 are legal values; rendering them as the failure sentinel would report an
+    // unreachable chain while the chain answered.
+    $("vmode").textContent = "mode "+zero(par.verification_mode, 0)+" · quorum "+zero(par.audit_min_quorum, 0);
+  }catch{ $("vmode").textContent = UNKNOWN; }
+}
+$("btnNet").onclick = refreshNetwork;
+
+$("btnPing").onclick = async ()=>{
+  $("netStatus").textContent="connecting…";
+  try{
+    const c=await StargateClient.connect(rpcURL());
+    const h=await c.getHeight();
+    c.disconnect?.();
+    // Reachable is not the same as knowing which chain a signature would be for. The chain-id is read
+    // and SHOWN here, before anyone opens a wallet against this endpoint; when it cannot be read the
+    // status says so and sending stays refused.
+    let id = null, why = "";
+    try{ id = await refreshChainId(); }catch(e){ why = (e && e.message) || String(e); }
+    $("netStatus").textContent = id
+      ? "OK · chain-id "+id+" · height "+h+" — this page signs for that chain-id"
+      : "reachable · height "+h+" · chain-id "+UNKNOWN+" ("+why+") — sending is refused until it can be read";
+  }
+  catch(e){
+    // An endpoint that does not answer leaves no chain-id worth showing: a stale one reads as current.
+    showChainId(null);
+    $("netStatus").textContent="unreachable — check RPC URL + node CORS";
+  }
+};
+// Shown as soon as the page can read it, so the header names the chain before any wallet is opened.
+// A failure here is silent on purpose: the "?" is the message, and nothing can be signed meanwhile.
+refreshChainId().catch(()=>{});
+</script>
+</body>
+</html>

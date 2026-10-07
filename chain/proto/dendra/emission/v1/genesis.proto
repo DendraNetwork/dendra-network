@@ -1,0 +1,40 @@
+syntax = "proto3";
+package dendra.emission.v1;
+
+import "amino/amino.proto";
+import "dendra/emission/v1/params.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/emission/types";
+
+// GenesisState defines the emission module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+
+  // EMISSION ENGINE STATE. It must cross an export/import unchanged: carrying it is what keeps
+  // `InitGenesis` from resetting the reserve to its genesis value and the epoch to 0. Without it, a
+  // single export/import round trip refills an already-spent reserve (the same release schedule is
+  // paid out twice); erases the unclaimed work and availability pools, so subsidies owed to miners
+  // vanish while the coins backing them are counted back as reserve; and leaves `last_epoch = 0`
+  // against an already-high height, which fires an epoch on the first block.
+  //
+  // The field is NULLABLE ON PURPOSE, and that is the whole subtlety: proto3 does not distinguish
+  // "absent" from "zero" on a scalar, and a legitimately exhausted reserve IS zero. An optional
+  // message makes the distinction legible — ABSENT means a fresh chain and the engine is bootstrapped;
+  // PRESENT means a resumption and the state is restored exactly, zeros included.
+  EmissionState state = 2;
+}
+
+// EmissionState — the engine state, as it must survive an export/import.
+message EmissionState {
+  uint64 reserve = 1;        // balance left in the release schedule
+  uint64 work_pool = 2;      // work subsidies released but NOT yet claimed
+  uint64 avail_pool = 3;     // same, for availability
+  uint64 security_pool = 4;  // accumulated security share
+  uint64 last_epoch = 5;     // height of the last epoch executed (schedule replay guard)
+  uint64 last_supply = 6;    // supply at the last epoch; the delta measures demand (burns)
+}
