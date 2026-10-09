@@ -1,0 +1,34 @@
+# Dendra — attaches the miner to the node running on THIS machine (deploy/testnet-node).
+#
+# The node kit owns a Docker network named `dendra-chain`, on which the node answers to its compose
+# project name (`dendra-node` unless DENDRA_PROJECT says otherwise). This file puts the `miner` service
+# on that network, so the miner reads its node container to container, at tcp://<project>:26657. Nothing
+# goes through the host: the node's RPC can stay published on 127.0.0.1 only.
+#
+# HOW IT IS ENABLED. deploy/join.sh, when it starts the miner with its own node, writes into this kit's
+# .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.local-node.yml[:docker-compose.override.yml]
+#   DENDRA_NODE=tcp://<node project>:26657
+# compose reads COMPOSE_FILE from the .env of the directory it runs in, so every command run FROM THIS
+# DIRECTORY without -f -- `cd deploy/testnet-miner && docker compose up -d`, the desktop application's
+# Start button -- gets the miner, this network and the GPU override together.
+# ⚠️ `docker compose -f docker-compose.yml up` from anywhere BYPASSES COMPOSE_FILE: the miner is then
+# recreated without this network (blind to its node) and without the GPU override. Use the directory
+# form for `up`; `docker compose -p dendra-miner logs|ps|stop|down` need no file at all.
+#
+# NOT in the base file on purpose: a miner that reads the operator's public RPC (join.sh --remote-rpc),
+# or a kit started by hand on a machine without a node, must not depend on a network that only exists
+# once a node kit has been started. Started before the node, compose refuses loudly: "network
+# dendra-chain declared as external, but could not be found".
+services:
+  miner:
+    # `default` stays listed: naming any network replaces the implicit one, and the miner reaches
+    # `ollama` (and `ollama-cpu` for a judge) on it.
+    networks:
+      default: {}
+      chain: {}
+
+networks:
+  chain:
+    name: dendra-chain
+    external: true

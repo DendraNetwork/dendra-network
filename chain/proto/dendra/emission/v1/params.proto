@@ -1,0 +1,23 @@
+syntax = "proto3";
+package dendra.emission.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/emission/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "dendra/x/emission/Params";
+  option (gogoproto.equal) = true;
+
+  // Share of the REMAINING Reserve released once per epoch (decaying curve); 2200 = 22%.
+  // The rate is per EPOCH, never per year: an epoch lasts epoch_blocks blocks, and the wall-clock
+  // length of a block is not fixed by the consensus. Any per-year figure is a projection over an
+  // assumed block interval, not a property of this parameter.
+  uint64 reserve_release_bps = 1;
+  uint64 work_split_bps = 2;      // 5000 = 50% of the release
+  uint64 avail_split_bps = 3;     // 2000 = 20%; security takes the remainder (about 30%)
+  uint64 work_gate_bps = 4;       // 15000 = 1.5x non-recoverable demand
+  uint64 epoch_blocks = 5;        // blocks between two releases (0 selects the default)
+}

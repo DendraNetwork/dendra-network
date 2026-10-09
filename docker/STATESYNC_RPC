@@ -1,0 +1,28 @@
+# docker/STATESYNC_RPC -- the RPC servers a NEW node derives its state-sync trust point from.
+#
+# WHAT A TRUST POINT IS. A node that starts from a snapshot does not replay the chain from the genesis: a
+# CometBFT light client verifies the snapshot against a trusted (height, block hash) pair, and never looks
+# at the genesis again. Whoever chooses that pair chooses the chain the new node joins.
+#
+# READ FROM THE CLONE, NEVER FROM network-info.txt. network-info is fetched over plain HTTP, so a trust point
+# published there would be chosen by whoever sits on the path, and would walk around docker/GENESIS_SHA256.
+# This file arrives with the repository, over HTTPS git, like the genesis pin, and names SERVERS rather than
+# a pair: deploy/join.sh (statesync_trust_point) derives the pair at every join, over TLS --
+#   1. each server's /status: its network must be the chain id the node is written with;
+#   2. the trust height is the lowest head among them minus join.sh's STATESYNC_TRUST_LAG_BLOCKS;
+#   3. each server's /block?height=<that height>: the same block hash from every server, or no state sync.
+# A server that does not answer, or answers something unreadable, leaves the node to REPLAY from the genesis
+# (said, never taken for an agreement). A server on another network, or two servers that disagree, STOP the
+# join: deploy/join.sh --replay is the way past, and needs no trust point.
+# Those servers are also the light client's rpc_servers (CometBFT asks for two; node-join.sh repeats a single
+# one): they must serve the CometBFT JSON-RPC at the URL given, over TLS, with a certificate for that name.
+#
+# WHAT ONE LINE IS WORTH. With one server listed, "every server agrees" holds trivially: the anchor is then
+# the TLS identity of that server's operator. It closes a man in the middle on the HTTP path; it closes
+# neither a compromised operator nor a compromised certificate authority. A second server, run by someone
+# else, is what turns the agreement into a witness.
+#
+# FORM. One URL per line: https only, a host name, an optional port and path, no query, nothing else on the
+# line. join.sh refuses the whole file if one line is anything else. Comment and blank lines are ignored.
+# Nothing here is specific to one genesis: the network each server serves is confronted at every join.
+https://testnet-api.dendranetwork.com/rpc

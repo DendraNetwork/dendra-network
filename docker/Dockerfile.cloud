@@ -1,0 +1,54 @@
+# check=skip=InvalidDefaultArgInFrom
+# (A parser directive, so it stays the first line: MINER_IMAGE below has no default ON PURPOSE, and the
+# build check would otherwise warn about the very property that makes a build without it fail.)
+#
+# ONE CONTAINER FOR A RENTED GPU POD (RunPod, Vast): Ollama and the miner together, started by
+# docker/cloud-start.sh. A pod runs one container and offers no Docker of its own, so the miner kit's compose
+# file (three services) cannot run there. Read deploy/cloud/README.md.
+#
+# BUILT ON THE MINER IMAGE OF THE SAME RELEASE, NEVER REBUILT. The release workflow builds and pushes the miner
+# image (docker/Dockerfile.miner), then builds this one with --build-arg MINER_IMAGE=<the digest it just
+# pushed>: dendrad, dendra-vrf, the miner's code and its entry point are COPIED from that image, so they are
+# the very bytes the miner image ships -- a second compile here could drift in its flags without a word.
+# MINER_IMAGE has NO default: a build that does not name the miner image fails, it never takes another one.
+#   docker build --build-arg MINER_IMAGE=ghcr.io/dendranetwork/dendra-miner@sha256:<digest> -f docker/Dockerfile.cloud .
+#
+# EVERY BASE IS NAMED BY DIGEST. A tag can be moved after the fact, a digest names the bytes; the tag next to
+# the digest only says which release it was. dendra/onchain-staging/dendra_image_cloud_garde.sh refuses a
+# base without a digest, a binary the miner's code calls and this image lacks, and a Python dependency of the
+# miner image this one does not install.
+# The image is built for linux/amd64 only, like the miner image it starts from.
+ARG MINER_IMAGE
+FROM ${MINER_IMAGE} AS miner
+
+FROM ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+
+# python3 for the miner, util-linux for mountpoint (cloud-start.sh asks whether /workspace is a volume) and
+# setsid (it starts Ollama and the miner each in a process group of its own, so that a stop reaches all they
+# started), curl for the network checks deploy/join.sh makes.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl util-linux && rm -rf /var/lib/apt/lists/*
+# The miner image's Python dependencies, in a virtual environment: this base's system Python refuses
+# packages installed by pip.
+RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir cryptography requests prometheus_client
+ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1
+
+COPY --from=miner /usr/local/bin/dendrad /usr/local/bin/dendrad
+COPY --from=miner /usr/local/bin/dendra-vrf /usr/local/bin/dendra-vrf
+COPY --from=miner /app /app
+COPY --from=miner /entrypoint.sh /entrypoint.sh
+
+# What checks the network: deploy/join.sh in library mode, the probe that sizes the model to the card, and the
+# gates of the tagged tree this image is built from. Nothing else of the kit, and never a .env.
+COPY deploy/join.sh deploy/hw_probe.sh /opt/dendra/deploy/
+COPY docker/GENESIS_SHA256 docker/KIT_VERSION docker/CONSENSUS_EPOCH docker/cloud-start.sh /opt/dendra/docker/
+# join.sh recognises its tree by deploy/testnet-node (this image runs no node), and checks a payout address
+# with the miner's own final_season_address.py, which it looks for under services/.
+RUN mkdir -p /opt/dendra/deploy/testnet-node /data && ln -s /app /opt/dendra/services && chmod 0755 /opt/dendra/docker/cloud-start.sh /opt/dendra/deploy/join.sh /opt/dendra/deploy/hw_probe.sh /entrypoint.sh
+
+WORKDIR /app
+# The same health signal as the miner image: whether the miner's loop is moving (modea/heartbeat.py).
+HEALTHCHECK --interval=60s --timeout=20s --start-period=30m --retries=3 CMD ["python3", "/app/miner_selftest.py", "--heartbeat"]
+# The Ollama base starts `ollama serve` by default; this image starts cloud-start.sh, which starts Ollama on
+# 127.0.0.1 itself. CMD is emptied so that the base's argument never reaches it.
+ENTRYPOINT ["/opt/dendra/docker/cloud-start.sh"]
+CMD []

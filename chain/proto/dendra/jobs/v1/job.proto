@@ -1,0 +1,45 @@
+syntax = "proto3";
+package dendra.jobs.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/jobs/types";
+
+// Job is one unit of paid inference: who asked for it, who serves it, what it pays, and the trace
+// of how it was settled or contested.
+message Job {
+  string job_id = 1;
+  string client = 2;
+  string miner_id = 3;
+  uint64 fee = 4;
+  string state = 5;
+  string creator = 6;
+  // Dispute state (bonded re-adjudication). All three fields are OPTIONAL: they hold the zero value
+  // (0 / "") for a job that was never disputed.
+  string disputer = 7;       // Address that challenged the verdict.
+  uint64 dispute_bond = 8;   // Bond escrowed (udndr) when the dispute was opened.
+  int64 dispute_height = 9;  // Block height at which the dispute was opened.
+  // Record of the slashes applied at settlement. It exists so the slashes can be REVERSED: when a
+  // dispute is upheld, resolution re-credits exactly these stakes from the treasury. Without a
+  // record of who lost how much, an unjust slash is irreversible even once it is proven unjust.
+  repeated SlashRecord slash_records = 10 [(gogoproto.nullable) = false];
+  // Number of DISTINCT OPERATORS behind the votes counted when the audit resolved (0 for a job with
+  // no resolved audit or no voter). A quorum reached by fifteen seats all held by one operator is a
+  // quorum in form only; monitoring reads the minimum of this field over its window. Without it,
+  // the measurement describes a procedure rather than a plurality (ADR-034).
+  uint64 audit_distinct_voters = 11;
+  // Plurality is not counted in heads: "distinct >= 2" is satisfied when a single operator holds
+  // nine votes out of ten. The property that matters is that NO operator held a MAJORITY of the
+  // votes counted, i.e. audit_max_operator_votes / audit_voters < 50%. Both fields are counted in
+  // the SAME loop as the tally itself, never in a second pass: two traversals of the same state
+  // drift apart, and a plurality figure that disagrees with the tally it describes is worse than none.
+  uint64 audit_voters = 12;             // Votes counted at resolution (denominator of the share).
+  uint64 audit_max_operator_votes = 13; // Largest number of those votes held by a single operator (numerator).
+}
+
+// SlashRecord is one slash applied to one miner at job settlement: who lost stake and how much.
+// It is the evidence that lets a successful dispute undo the slash.
+message SlashRecord {
+  string miner_id = 1;
+  uint64 amount = 2;
+}

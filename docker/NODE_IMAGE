@@ -1,0 +1,28 @@
+# docker/NODE_IMAGE -- the prebuilt NODE image deploy/join.sh may pull, for a NEW node, instead of building one.
+#
+# READ FROM THE CLONE, NEVER FROM network-info.txt. network-info is fetched over plain HTTP, so an image
+# named there would be chosen by whoever sits on the path, and this image carries the CONSENSUS BINARY the
+# node runs. This file arrives with the repository, over HTTPS git, like docker/GENESIS_SHA256. join.sh
+# ignores a DENDRA_NODE_IMAGE served by network-info.
+#
+# HOW IT IS WRITTEN. After a release, take the two lines of that release's node-image.txt asset
+# (.github/workflows/release.yml, job node-image), put them below these comments, and commit them:
+#   # built-for: kit_version=<K> consensus_epoch=<E> release=<vX.Y.Z>
+#   DENDRA_NODE_IMAGE=ghcr.io/dendranetwork/dendra-node@sha256:<64 lowercase hex>
+# The reference names one image for linux/amd64 and linux/arm64, and the release job has compared the
+# dendrad of each with the released binary before writing it (.github/node_image_gate.sh). join.sh accepts
+# exactly that value form -- the official namespace and a full digest, never a tag -- with exactly one
+# `built-for` line whose two gates equal docker/KIT_VERSION and docker/CONSENSUS_EPOCH of the clone, and
+# builds the image from the clone otherwise, saying why. The package has to be public: when the pull fails,
+# join.sh warns and builds from the clone as well.
+#
+# A NEW NODE ONLY. join.sh applies the pin when the node's volume does not exist yet, and starts the pulled
+# image only on a Docker engine of its platform. A node that already holds chain state keeps the binary it
+# holds it with: changing that binary is an upgrade, a separate gesture, not a join.
+#
+# THE PIN HOLDS ONLY FOR THE GATES IT WAS BUILT FOR. The repository is not published while they differ
+# from docker/KIT_VERSION or docker/CONSENSUS_EPOCH, and a release is not tagged while a value is present:
+# the image would run code another kit was released with. Empty the value line, with its `built-for` line,
+# before either moves; the next release pins its own image.
+#
+# With no value line below, join.sh builds the node image from the clone.

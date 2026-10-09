@@ -1,0 +1,20 @@
+# docker/CLOUD_IMAGE -- the single-container miner image for a rented GPU pod (RunPod, Vast): Ollama and the
+# miner in one container, started by docker/cloud-start.sh (docker/Dockerfile.cloud, deploy/cloud/README.md).
+# Nothing in this repository pulls it: whoever rents a pod copies the value below into the provider's
+# container image field.
+#
+# HOW IT IS WRITTEN. After a release, take the two lines of that release's cloud-image.txt asset
+# (.github/workflows/release.yml, jobs cloud-image and cloud-image-attach), put them below these comments,
+# and commit them:
+#   # built-for: kit_version=<K> consensus_epoch=<E> release=<vX.Y.Z>
+#   DENDRA_MINER_CLOUD_IMAGE=ghcr.io/dendranetwork/dendra-miner-cloud@sha256:<64 lowercase hex>
+# A digest, never a tag: a tag can be moved after the fact, a digest names the bytes the release built. The
+# image is built for linux/amd64 only, like the miner image it is built on. The package has to be public,
+# or a pod cannot pull it.
+#
+# THE PIN HOLDS ONLY FOR THE GATES IT WAS BUILT FOR, as for docker/MINER_IMAGE and by the same gate
+# (dendra/onchain-staging/dendra_epinglage_image_garde.sh): the repository is not published while the
+# `built-for` line differs from docker/KIT_VERSION or docker/CONSENSUS_EPOCH, and a release is not tagged
+# while a value is present -- the image of a release is built from its tree, and pinned after its run.
+#
+# With no value line below, no cloud image is pinned for this tree.

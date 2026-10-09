@@ -1,0 +1,313 @@
+# Dendra — all-in-one MINER to join a PUBLIC testnet.
+# 3 steps:  cp .env.example .env   ->   fill in the public endpoints   ->   docker compose up -d --build
+#
+# This package does NOT launch a chain: it runs ONLY your local engine (Ollama, on your GPU) + the miner client,
+# which connect to the operator's PUBLIC RPC/relay/faucet. The model is downloaded LOCALLY on THIS machine (never
+# centralized) then served by it -- this is the condition for decentralization/privacy/verification.
+# NO MINING MODEL ON THE CPU: a machine without a usable GPU is a JUDGE on the CPU (from MOE_CPU_MIN_RAM_MB of RAM)
+# or is refused, as deploy/hw_probe.sh --role decides. For the judge, deploy/join.sh writes the machine's
+# docker-compose.override.yml: the CPU instance below (ollama-cpu) holds the judge model and the embedder and
+# answers the miner's requests too, and `ollama` stays empty.
+name: dendra-miner
+
+# THE LOGS ARE ROTATED. Docker's default json-file driver keeps every line a container prints for as long as the
+# container lives, and a miner prints for months: on a rig whose system disk is small, the log grows until the
+# disk is full. Each service keeps at most max-file files of max-size each (CHOSEN, not measured: room for weeks
+# of a quiet miner's lines, a bounded cost on any disk). The driver is NAMED, not inherited: options of one
+# driver given to another (a host whose daemon.json says journald) make compose refuse to create the container.
+# ⚠️ WHAT ROTATION COSTS, SAID WITH IT: a line printed ONCE leaves the log eventually -- the miner's address on
+# its "ready  addr=..." line among them. It is read where it does not rotate: the heartbeat (`address`), and
+#   docker compose -p dendra-miner exec -T miner python3 -m modea.keyring address /data/keys
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# THE INFERENCE ENGINE IS PINNED, by version AND by digest, and named ONCE: the four services below that run it
+# (ollama, ollama-cpu, model-init, judge-model-init) all point at this line. `latest` gave each machine the
+# version that was current on the day it pulled, so two machines of the same kit could run two engines: the
+# concurrency of the judge's CPU instance, and the engine that computes the answer embedding a juror compares
+# with the miner's anchor, followed the install date. The digest names the MULTI-PLATFORM INDEX (linux/amd64 and
+# linux/arm64), not one platform's manifest, so each engine resolves the image of its own platform from it; it is
+# the same index docker/Dockerfile.cloud starts from, so the rented-GPU pod and this kit run one engine. Read
+# what it names by its digest, the part after `@` below, never by the tag alone (a registry can move a tag to
+# another image, never a digest):  docker buildx imagetools inspect ollama/ollama@sha256:<that digest>
+# OLLAMA_NUM_PARALLEL is NOT set in this file: each parallel request holds a KV cache of its own, so this number
+# moves the RAM a judge needs (deploy/hw_probe.sh, MOE_CPU_MIN_RAM_MB). The judge role on the CPU sets it to 2
+# for ollama-cpu in the override deploy/join.sh writes (write_cpu_judge_override), where the miner's requests and
+# its presence probe share that instance with the judge; with a GPU, ollama-cpu serves the judge alone.
+x-ollama-image: &ollama-image "ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551"
+
+services:
+  # Your local inference engine, on the GPU (the judge role on the CPU leaves it empty). The model lives in the 'ollama-models' volume on YOUR machine.
+  ollama:
+    image: *ollama-image
+    logging: *logging
+    volumes: ["ollama-models:/root/.ollama"]
+    # Ollama unloads an idle model after 5 minutes. The programme requests the chain draws for this miner
+    # (Final Testnet Season, ADR-047) arrive at no fixed pace, and each is best served with the model
+    # already loaded: one reload of the 8B was measured at 69 s on a busy disk, time the request spends
+    # waiting. One hour keeps the model loaded across any gap of less than an hour between requests, and
+    # still frees the card an hour after the last one.
+    environment:
+      OLLAMA_KEEP_ALIVE: "1h"
+    # --- NVIDIA GPU: UNCOMMENT (nvidia-container-toolkit required on the host) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: ["gpu"] }]
+    # ONE IDENTITY PER CARD: see deploy/testnet-miner/slots.sh and deploy/join.sh --gpus. The card is pinned in
+    # the GENERATED override of each slot, by its UUID written literally -- never here: an empty
+    # CUDA_VISIBLE_DEVICES means NO GPU (ollama-cpu below relies on it), so this file never interpolates one.
+    restart: unless-stopped
+
+  # SECOND Ollama, CPU-ONLY, for the AUDIT JUDGE — activate with:  --profile judge
+  #
+  # WHY A SECOND ONE. Mining and judging on the SAME Ollama is a measured failure, not a theory: the
+  # judge's MoE (~19 GB) EVICTS the miner's model from the single instance, `miner` exits with
+  # `FATAL Ollama ReadTimeout`, and every assigned job stays `open` — the machine looks alive while
+  # serving nothing. Scheduling alone does not fix it; two engines do.
+  #
+  # WHY CPU. `qwen3:30b-a3b` is a Mixture-of-Experts: ~3B ACTIVE parameters out of 30B, so it judges
+  # at usable speed on CPU while the GPU keeps mining — and it needs ~19 GB of RAM, which no consumer
+  # card has. `CUDA_VISIBLE_DEVICES=""` is what guarantees it never touches the GPU.
+  ollama-cpu:
+    image: *ollama-image
+    logging: *logging
+    profiles: ["judge"]
+    volumes: ["ollama-judge-models:/root/.ollama"]   # separate volume: the judge's weights are NOT the miner's
+    environment:
+      CUDA_VISIBLE_DEVICES: ""                       # hard CPU-only: the GPU stays entirely for mining
+    restart: unless-stopped
+
+  # One-shot: pulls the JUDGE model into the CPU instance (only with --profile judge).
+  # RETRIED ON FAILURE. Nothing waits on this download (the judge worker waits for the model itself, in
+  # docker/entrypoint-services.sh), so a pull that is not tried again leaves the seat mute. Docker retries a
+  # failed one-shot after a delay that grows on each failure; a pull that succeeds exits 0 and is not run again.
+  # A network failure heals on its own. A tag that does not exist fails at every retry. A FULL DISK heals only
+  # once space is freed: the model lands under Docker's data root, next to the node's volume when the node runs
+  # on this machine, and each retry takes back whatever space is freed there until the model is whole -- free
+  # the space the model needs, not only what the node needs (deploy/join.sh warns before the first pull when
+  # that disk is below DENDRA_MIN_DISK_GB_JUDGE). Each failure is in `docker compose logs judge-model-init`.
+  judge-model-init:
+    image: *ollama-image
+    logging: *logging
+    profiles: ["judge"]
+    depends_on: [ollama-cpu]
+    environment:
+      OLLAMA_HOST: "http://ollama-cpu:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'until ollama list >/dev/null 2>&1; do echo "waiting for the CPU Ollama..."; sleep 2; done;
+         echo "LOCAL download of the JUDGE model ${DENDRA_JUDGE_MODEL_ID:-qwen3:30b-a3b-instruct-2507-q4_K_M} (~19 GB, one time only)...";
+         ollama pull "${DENDRA_JUDGE_MODEL_ID:-qwen3:30b-a3b-instruct-2507-q4_K_M}"'
+    restart: on-failure
+
+  # One-shot: downloads the PINNED model LOCALLY before mining (must match the on-chain registry).
+  # Each pull that fails FAILS model-init (`|| exit 1`): the miner starts only once model-init has completed
+  # successfully, and a status taken from the last pull alone (the embedder) let it start without the model it
+  # serves, the failed pull named nowhere but in this one-shot's log. Same rule as the override deploy/join.sh
+  # writes for the judge role on the CPU.
+  model-init:
+    image: *ollama-image
+    logging: *logging
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'until ollama list >/dev/null 2>&1; do echo "waiting for Ollama..."; sleep 2; done;
+         echo "LOCAL download of model ${DENDRA_MODEL_ID} (~5 GB, one time only)...";
+         ollama pull "${DENDRA_MODEL_ID}" || exit 1;
+         echo "LOCAL download of the verification embedder ${DENDRA_EMBED_API_MODEL:-nomic-embed-text} (~270 MB)...";
+         ollama pull "${DENDRA_EMBED_API_MODEL:-nomic-embed-text}" || exit 1'
+    restart: "no"
+
+  # The miner client: creates its key, funds itself at the faucet, registers on-chain (SIGNS itself), then
+  # loops (receives assigned jobs -> decrypts in memory -> infers on Ollama -> returns sealed -> anchors the commit).
+  miner:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.miner
+    # The tag this build produces, and the tag `up` starts. Overridable for the same reason as the node
+    # kit's DENDRA_NODE_IMAGE: a host that cannot afford the first build (a rig with little RAM or
+    # disk) can point this at an image built elsewhere from the same tree. Two things to know before
+    # relying on it. On a service that carries both `build:` and `image:`, `up -d` BUILDS when the tag
+    # is absent locally rather than pulling it -- the no-build path has to be asked for:
+    #   docker compose pull miner && docker compose up -d --no-build
+    # And `deploy/join.sh` sets this variable itself, from docker/MINER_IMAGE in the clone only (never
+    # from network-info.txt, which travels over plain HTTP): a full digest in the official namespace is
+    # pulled and started only when its platform is that of the Docker engine; anything else is built.
+    # Nothing changes when the variable is unset.
+    image: ${DENDRA_MINER_IMAGE:-dendra/miner:latest}
+    logging: *logging
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    # REACHING A NODE THAT RUNS ON THIS SAME MACHINE.
+    # The recommended setup pairs this miner with its OWN full node (deploy/testnet-node), so the miner
+    # never has to trust — or depend on — someone else's RPC. The two stacks are separate compose projects:
+    # from inside this container, `127.0.0.1` is the MINER, not the node. They meet on the node kit's
+    # `dendra-chain` network, which docker-compose.local-node.yml (next to this file) adds to this service;
+    # deploy/join.sh enables it through COMPOSE_FILE in this kit's .env. That network is NOT named here:
+    # a miner on a remote RPC (--remote-rpc) must not depend on it.
+    # `host.docker.internal` is kept for a kit generated by an older join.sh, whose .env still names it:
+    # it only reaches a node whose RPC is published on every interface (DENDRA_RPC_BIND=0.0.0.0), which
+    # is no longer the node kit's default -- re-running deploy/join.sh moves such a kit to the alias.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Chain RPC used to sign and to query. `deploy/join.sh` writes either
+      # tcp://<node project>:26657 (this machine's own node, `dendra-node` by default — the default setup
+      # and the recommendation) or the operator's public RPC (--remote-rpc). A miner reading its own node
+      # cannot be shown a filtered view of the chain, and does not go blind when someone else's endpoint
+      # goes down.
+      DENDRA_NODE: "${DENDRA_NODE}"
+      DENDRA_RELAY: "${DENDRA_RELAY}"      # public blind relay (E2E-encrypted jobs)
+      # RELAY TOKEN — OPTIONAL, and it is no longer what lets a miner receive work.
+      # The relay's policy is set PER ROUTE, not for the whole service. Reading the work queue
+      # (`GET /list`) is OPEN and answers 200 without any token: the bodies are sealed to a key anchored
+      # on chain, the design already assumes the relay is hostile, so no shared secret protects anything
+      # there — while requiring one turned a permissionless network into one gated by a secret handed
+      # out by hand. Writing miner content is the opposite case: it has to prove WHICH miner, which a
+      # shared secret cannot express, so those routes take a SIGNATURE (the token stays accepted as a
+      # fallback so an operator running yesterday is not broken today).
+      # LEAVE THIS EMPTY unless an operator gave you one. It is not needed to be served a job.
+      # ⚠️ AND IF IT EVER GOES BLIND ANYWAY, THE SILENCE IS THE REAL DEFECT: `relay_client` swallows the
+      # error (`except: return`), so a miner that cannot read the queue concludes "no job" and waits
+      # forever — GPU on, registration valid, zero work, no message. Do not read "no job" as "quiet
+      # network": check `curl -s -o /dev/null -w '%{http_code}' "$DENDRA_RELAY/list"` yourself, it must
+      # print 200.
+      DENDRA_RELAY_TOKEN: "${DENDRA_RELAY_TOKEN:-}"
+      FAUCET: "${FAUCET}"                  # public faucet (miner self-funding)
+      # Time bound on the faucet proof of work. Documented in .env.example and in deploy/README.md as
+      # the knob to raise when the operator picked a very high difficulty — but it was NOT listed here,
+      # and compose forwards ONLY the variables it names. An operator who uncommented it in .env saw
+      # the value ignored and the startup give up at the built-in 300 s, with nothing to link cause to
+      # effect. The default is written as a NUMBER, never an empty string: services/miner.py parses it
+      # with float(), and float("") raises at import — an empty forward would trade a silent no-op for
+      # a container that dies before its first line of work.
+      DENDRA_FAUCET_POW_MAX_S: "${DENDRA_FAUCET_POW_MAX_S:-300}"
+      # The other knobs of the daemon and of the serve guard that the CHANGELOG names, forwarded for the same reason.
+      # EMPTY means the reader's own default (miner.py, serve_guard.py read an empty value as unset), so no
+      # second copy of a default lives here:
+      #   DENDRA_REGISTER_RETRY_S    the wait before a registration the faucet refused is tried again;
+      #   DENDRA_PRESENCE_PROBE_S    the bound on the test inference that proves this miner is present (a judge on
+      #                              the CPU answers more slowly than a card: this is the bound it would raise);
+      #   DENDRA_SERVE_GUARD_WAIT_S  the bound on reading where the served model runs before the miner starts.
+      DENDRA_REGISTER_RETRY_S: "${DENDRA_REGISTER_RETRY_S:-}"
+      DENDRA_PRESENCE_PROBE_S: "${DENDRA_PRESENCE_PROBE_S:-}"
+      DENDRA_SERVE_GUARD_WAIT_S: "${DENDRA_SERVE_GUARD_WAIT_S:-}"
+      # The bounds of the job loop and of the judge, forwarded the same way (EMPTY = the reader's own default):
+      #   DENDRA_JOB_MAX_ATTEMPTS   how many times one job is tried before the daemon stops retrying it;
+      #   DENDRA_REQUEST_MAX_AGE_S  the age past which a waiting request is skipped instead of served;
+      #   DENDRA_JUDGE_TIMEOUT_S    the bound on one call of the judge to its model (a call past it is an
+      #                             abstention, never a vote).
+      DENDRA_JOB_MAX_ATTEMPTS: "${DENDRA_JOB_MAX_ATTEMPTS:-}"
+      DENDRA_REQUEST_MAX_AGE_S: "${DENDRA_REQUEST_MAX_AGE_S:-}"
+      DENDRA_JUDGE_TIMEOUT_S: "${DENDRA_JUDGE_TIMEOUT_S:-}"
+      # A DIVERGENCE DOES NOT SLASH unless this is exactly 1. A juror whose own reference answers diverge from the
+      # revealed answer ABSTAINS instead of voting invalid (judge_worker.py::divergence_guard, stages `slash` and
+      # `legacy`): each juror resolves its judge model from the chain's pin first (modelregistry
+      # `audit_judge_model`, judge_worker.py::resolve_judge_model), so the seats that follow it judge with one
+      # model, and an error of that model repeats on those seats instead of being outvoted. Anything but exactly
+      # 1 = abstain, the judge's own default. A revealed answer that differs from the miner's anchor abstains
+      # whatever this is set to, and an answer that is not coherent is voted invalid either way.
+      DENDRA_JUDGE_DIVERGENCE_SLASH: "${DENDRA_JUDGE_DIVERGENCE_SLASH:-}"
+      # A PROVEN AMBIGUITY (the judge disagrees with itself, or several answers are right) is voted valid while
+      # this is EMPTY or exactly 1 (judge_worker.py::ABSTAIN_VOTE, the judge's own default); 0, or any other value,
+      # abstains instead. Forwarded so that a value the owner sets in the .env reaches the judge.
+      DENDRA_JUDGE_ABSTAIN_VOTE: "${DENDRA_JUDGE_ABSTAIN_VOTE:-}"
+      OLLAMA_ENDPOINT: "http://ollama:11434"
+      DENDRA_MODEL_ID: "${DENDRA_MODEL_ID}"
+      # THE MODEL PULLED MUST BE THE MODEL SERVED, and only naming it here makes that true.
+      # The `ollama` service above runs `ollama pull "${DENDRA_MODEL_ID}"` — the tag hw_probe.sh picks
+      # for this hardware. The inference backend reads `OLLAMA_MODEL` (`modea/inference.py`) and falls
+      # back to a HARDCODED `llama3.1:8b-instruct-q4_K_M`. Those two coincide only at tier 2: an
+      # operator at tier 1 (llama3.2:3b) or 3+ (mistral-nemo, qwen3) would download one model and then
+      # ask Ollama for another, absent one — a 404 on every job, on a machine whose every other check
+      # passed. Same rule as everywhere in this file: compose transmits ONLY what it NAMES.
+      OLLAMA_MODEL: "${DENDRA_MODEL_ID}"
+      BACKEND: "ollama"
+      # Registration stake. EMPTY means the miner reads `min_stake` FROM THE CHAIN (recommended): it is
+      # a governed parameter, and a lower local value makes `create-miner` FAIL — the miner then runs
+      # without ever appearing in the registry, and therefore never receives a job.
+      DENDRA_MINER_STAKE: "${DENDRA_MINER_STAKE:-}"
+      # Cosmos keyring INSIDE the volume: otherwise `up --build` recreates the container, the signing
+      # key disappears with its filesystem, and the miner restarts on a NEW address — no funds, no
+      # registration, no stake — even though its MINER_ID has not changed.
+      # ENCRYPTED OR IN CLEAR IS NOT SET HERE: the miner reads it from the volume itself
+      # (services/modea/keyring.py) — an encrypted keyring (keyring-file) needs the passphrase
+      # mounted below, a clear one (keyring-test) does not. A setting that could disagree with the disk
+      # would let a miner look in an empty directory and create a new identity.
+      DENDRA_KEYRING_DIR: "/data/keys/cosmos"
+      # ⛔ DENDRA_MINER_PASSPHRASE IS NEVER LISTED HERE. A variable compose forwards is printed by
+      # `docker inspect` and readable in /proc/<pid>/environ; the passphrase reaches the miner as a FILE,
+      # mounted read-only (volumes, below).
+      # Final Testnet Season payout address, written by `deploy/join.sh --payout-address dendra1...`. The
+      # miner declares it once it is registered, and again only when this value changes. Empty: the season
+      # pays this machine's own key — the Dendra application says so until an address is declared.
+      DENDRA_PAYOUT_ADDRESS: "${DENDRA_PAYOUT_ADDRESS:-}"
+      # OWNER MODE, written by `deploy/join.sh --owner dendra1...`: the address of the key that REGISTERS this
+      # miner and holds its stake, kept off this machine. The identifier derives from it; the miner never
+      # sends create-miner, it prints the commands its owner signs, and mines once the chain names this
+      # machine's key the operator. Empty: the miner registers itself, as before.
+      DENDRA_MINER_OWNER: "${DENDRA_MINER_OWNER:-}"
+      # SIGNED RELAY WRITES — the key that signs is the one named by the miner id, because the daemon
+      # already uses the identifier as its keyring entry name (`keys_addr(a.id)`). Defaulting to
+      # ${MINER_ID} rather than asking for it twice is the same rule as everywhere else here: one
+      # input cannot disagree with itself, and two that can will eventually be set to different values.
+      #
+      # ⚠️ NAMED HERE BECAUSE COMPOSE TRANSMITS ONLY WHAT IT NAMES. Setting DENDRA_SIGN_KEY in the .env
+      # without this line does exactly nothing, and the miner would keep sending unsigned deposits
+      # while its operator believed otherwise — the failure only becoming visible the day the relay
+      # requires signatures, as writes refused for no reason anyone can see.
+      # ⛔ IT IS THE NAME AT START ONLY. The daemon renames this keyring entry to the derived `dm1...` and
+      # re-points its own signer to it (miner.py, relay.set_sign_key); docker/entrypoint-services.sh
+      # starts the reveal and judge workers with DENDRA_SIGN_KEY set to that RESOLVED identity. A worker that
+      # inherited this value signed with a name the keyring no longer holds: every reveal went out unsigned.
+      DENDRA_SIGN_KEY: "${DENDRA_SIGN_KEY:-${MINER_ID}}"
+      DENDRA_EMBED_MODE: "${DENDRA_EMBED_MODE:-backend}"          # real SEMANTIC verification (not bag-of-words)
+      DENDRA_EMBED_API_MODEL: "${DENDRA_EMBED_API_MODEL:-nomic-embed-text}"
+      # Optional: miner + audit committee (reveal/judge workers).
+      # DORMANT by default (0). DENDRA_JUDGE_ENDPOINT = the JUDGE's Ollama (empty = the service's own).
+      DENDRA_MINER_JUDGE: "${DENDRA_MINER_JUDGE:-0}"
+      # Final Testnet Season programme (ADR-047), written by join.sh from network-info. Read only by the
+      # payout declaration (final_season_miner.py payout) and the desktop application's Final Testnet
+      # Season view; empty, the identity is still ranked and paid on chain facts, to its operator address.
+      DENDRA_FINAL_SEASON_URL: "${DENDRA_FINAL_SEASON_URL:-}"
+      DENDRA_JUDGE_ENDPOINT: "${DENDRA_JUDGE_ENDPOINT:-}"
+      # A judge MUST carry its judge model on-chain so committee-model DIVERSITY is measurable (C3 gate /
+      # ADR-031). Without these, a judge joining via this kit falls back to the default model and dilutes
+      # the on-chain proxy. join.sh writes DENDRA_JUDGE_MODEL_ID; leave _OVERRIDE empty unless you choose a
+      # model, since it beats the model the chain names. The judge runs on the CPU (deploy/hw_probe.sh,
+      # MOE_CPU_MIN_RAM_MB).
+      DENDRA_JUDGE_MODEL_OVERRIDE: "${DENDRA_JUDGE_MODEL_OVERRIDE:-}"
+      DENDRA_JUDGE_MODEL_ID: "${DENDRA_JUDGE_MODEL_ID:-}"
+      # WHICH CARD'S IDENTITY THIS IS (deploy/join.sh --gpus writes DENDRA_SLOT in each slot's env; 0 is the kit's
+      # own, the only one without --gpus). The daemon prints it in the ways out it names: `join.sh --id`
+      # changes slot 0 only, and printed in a slot k it pointed at another card's identity.
+      DENDRA_SLOT: "${DENDRA_SLOT:-0}"
+    command: ["miner", "${MINER_ID}"]
+    volumes:
+      # The persistent IDENTITY: the keyring, the encryption, VRF and attestation keys.
+      - "miner-keys:/data/keys"
+      # The keyring's PASSPHRASE, read-only: a directory OUTSIDE the volume and outside this clone,
+      # `~/.config/dendra/miner-secrets` (0700, its file keyring-passphrase 0600), created by
+      # deploy/join.sh for a new installation and by encrypt-keys.sh for an existing one.
+      # The default `./secrets` is an EMPTY directory so that a kit whose .env predates this line still
+      # starts: a miner without a passphrase keeps its clear keyring, and an encrypted keyring without
+      # its passphrase stops the miner with the reason — it never creates a new key.
+      # ⚠️ BACK UP BOTH: the volume AND this file. An encrypted keyring without its passphrase is lost,
+      # and with it the account, unless its 24-word recovery phrase was written down. Both together are
+      # as sensitive as a key in clear: keep their backups apart, or offline.
+      - "${DENDRA_SECRETS_DIR:-./secrets}:/run/dendra-secrets:ro"
+    restart: unless-stopped
+
+# With one identity per card (deploy/join.sh --gpus), each extra slot mounts slot 0's model store as an
+# EXTERNAL volume (dendra-miner_ollama-models) in its generated override: one copy of each model per machine.
+volumes:
+  ollama-models: {}
+  ollama-judge-models: {}   # judge weights, kept apart from the miner's (profile: judge)
+  miner-keys: {}     # the miner's keys: back it up together with the passphrase file (see the miner service)

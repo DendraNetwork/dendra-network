@@ -1,0 +1,7 @@
+cryptography>=42.0
+requests>=2.31
+# The README's own sequence runs the test suite, so pytest is a dependency of the documented path,
+# not an optional extra: it must be pinned HERE, because `pip install -r requirements.txt` installs
+# this file and nothing else — a pytest named only in the README's prose leaves the next line of that
+# same README dying on `pytest: command not found`.
+pytest>=8.0

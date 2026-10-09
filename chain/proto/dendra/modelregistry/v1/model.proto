@@ -1,0 +1,21 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/modelregistry/types";
+
+// Model — an inference model AUTHORIZED on-chain (governed attestation).
+// `weights_sha256` is the trust anchor: the chain only pays for inference whose served model matches
+// a registered and active Model (enforcement lives in x/jobs).
+message Model {
+  string id = 1;             // identifier (e.g. "llama3.1:8b-instruct-q4_K_M")
+  string weights_sha256 = 2; // weights hash (content-addressed; Ollama/HF digest)
+  string quant = 3;          // quantization (e.g. "Q4_K_M")
+  string engine = 4;         // engine and version (e.g. "ollama 0.x" / "llama.cpp build")
+  string hw_class = 5;       // indicative hardware class
+  bool active = 6;           // currently authorized
+  // Optional Hugging Face anchor: a REPRODUCIBLE and auditable model identity.
+  string hf_repo = 7;        // HF repository (e.g. "org/Llama-3.1-8B-Instruct-GGUF")
+  string hf_revision = 8;    // IMMUTABLE revision (commit SHA or tag) — REQUIRED when hf_repo is set
+}

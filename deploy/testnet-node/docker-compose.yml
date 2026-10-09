@@ -1,0 +1,251 @@
+# Dendra — all-in-one NODE to join a PUBLIC testnet (chain sync).
+# 3 steps:  cp .env.example .env  ->  fill in GENESIS_URL + SEEDS  ->  docker compose up -d --build
+# (with a prebuilt image by digest in .env, DENDRA_NODE_IMAGE=...@sha256:..., start with `up -d --no-build`:
+# compose cannot tag a build with a digest reference -- see README.md, "A prebuilt image instead of the build")
+#
+# This node SYNCS the chain from the public seeds (it does NOT launch its own genesis). To BECOME A
+# VALIDATOR (stake bond): see README.md, the manual 'create-validator' step.
+#
+# ── PEER REDUNDANCY: read this before you bond stake ────────────────────────────────────────────
+# SEEDS and PERSISTENT_PEERS are COMMA-SEPARATED LISTS. node-join.sh writes each string verbatim
+# into config.toml (`seeds = ` / `persistent_peers = `), so naming several hosts costs nothing and
+# is the only thing that gives this node a second way into the network.
+# HOW MANY HOSTS your network-info.txt names in each field is a READING, not a property of this
+# file: open it and count the comma-separated entries. If a field names one, that node has exactly
+# one possible peer and no redundancy at all. Peer discovery does not repair that on its own:
+# `pex` is enabled in the shipped config, and on the operator's own node it asked for more addresses
+# over a three-hour log window and learned nothing - the address book still held a single entry.
+# A node that reaches only one peer misses blocks whenever that link drops, and missed blocks jail a
+# validator and slash it. ⛔ NO THRESHOLD IS WRITTEN HERE ON PURPOSE: the window, the share of it you
+# must sign, and the two slash fractions are all governable, and a number copied into a comment is
+# wrong at the next parameter change. Read the four values before you bond:
+#   curl -s http://testnet-api.dendranetwork.com:1317/cosmos/slashing/v1beta1/params
+# See README.md, section "Availability and peer redundancy", for the mechanism.
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+#
+# ── THIS KIT USED TO HIJACK AN EXISTING NODE. Read before you change the names below ────────────
+# COMPOSE KEYS A PROJECT BY NAME, NOT BY DIRECTORY. A hard-coded `name:` therefore makes every copy
+# of this repository resolve to the SAME project, the SAME containers and the SAME chain-data volume:
+# from a second clone, `docker compose ps` lists the node this machine is already running, and `up -d`
+# does not create a second node — it RECREATES the first one, from a source tree that never started
+# it, on top of its chain state and its validator key. Hence the overridable name and ports below.
+# The five knobs below are therefore variables with the OLD literals as defaults: an operator who
+# sets nothing keeps exactly the previous behaviour, and one who wants a second, harmless node sets
+# DENDRA_PROJECT + DENDRA_P2P_PORT + DENDRA_RPC_PORT + DENDRA_REST_PORT + DENDRA_NODE_IMAGE and
+# collides with nothing. ⚠ A HOST PORT IS TAKEN BY WHOEVER BINDS IT FIRST, whatever the project: leave
+# one of the three ports at its default and the second node fails to start ("port is already
+# allocated") — next to the first node, and next to the root stack's chain, which publishes the same
+# three numbers.
+# COMPOSE_PROJECT_NAME still overrides this field (measured on Compose v5.3.0), so the documented
+# escape hatch keeps working.
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+name: ${DENDRA_PROJECT:-dendra-node}
+
+services:
+  # ── THE GUARD. Refuses to start the node on a chain home this copy of the kit was not told to use.
+  # It runs before `node` (depends_on/service_completed_successfully) and mounts the volume READ-ONLY:
+  # it can refuse, it cannot damage. The discriminator is `.env`, which is per-COPY of the kit and is
+  # gitignored (pattern `deploy/testnet-node/.env`) — a second clone gets a fresh `.env` from
+  # `.env.example`, so it does NOT carry the flag and gets refused. That is the whole point: the flag
+  # cannot travel with the source.
+  # A marker file inside the kit directory would have been the obvious alternative and is WRONG here —
+  # build_public_repo.sh copies the WORKING TREE (see its "LOCALLY GENERATED RESIDUE" section), so the
+  # marker would ship in the public mirror and every cloner would inherit the operator's identity,
+  # disarming the guard for exactly the people it protects.
+  # ⚠ ABSENCE IS A REFUSAL, NOT A PASS: an unset flag reads as 0. There is no value of "we could not
+  # tell" that lets the node through.
+  preflight:
+    # Same build/image as `node` on purpose: no second base image to pull, and the image is guaranteed
+    # to exist by the time this runs (compose builds every service before it starts any of them).
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.node
+    image: ${DENDRA_NODE_IMAGE:-dendra/node:latest}
+    restart: "no"
+    environment:
+      # Compose forwards ONLY what it names — an unlisted variable never reaches the container and the
+      # guard that depends on it becomes unreachable. Same rule as the escape hatches further down.
+      DENDRA_ADOPT_EXISTING_HOME: "${DENDRA_ADOPT_EXISTING_HOME:-0}"
+      DENDRA_PROJECT_NAME: "${DENDRA_PROJECT:-dendra-node}"
+    volumes:
+      - "node-data:/root/.dendra:ro"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        H=/root/.dendra
+        if [ ! -e "$$H/config/genesis.json" ] && [ -z "$$(ls -A "$$H/data" 2>/dev/null)" ]; then
+          echo "[preflight] no chain home in volume $${DENDRA_PROJECT_NAME}_node-data -> new node, continuing."
+          exit 0
+        fi
+        # Display only, and a DISTINCT sentinel when unreadable: an unreadable config.toml must not
+        # print an empty moniker that reads like "nobody's node".
+        WHO="$$(grep -m1 '^moniker' "$$H/config/config.toml" 2>/dev/null | cut -d'"' -f2)"
+        [ -n "$$WHO" ] || WHO='?'
+        if [ "$${DENDRA_ADOPT_EXISTING_HOME:-0}" = "1" ]; then
+          echo "[preflight] DENDRA_ADOPT_EXISTING_HOME=1 -> reusing the existing chain home (moniker $$WHO)."
+          exit 0
+        fi
+        echo "[preflight] REFUSING TO START — this would take over a chain home that is already there." >&2
+        echo "[preflight]   compose project : $${DENDRA_PROJECT_NAME}" >&2
+        echo "[preflight]   volume          : $${DENDRA_PROJECT_NAME}_node-data" >&2
+        echo "[preflight]   its moniker     : $$WHO   ('?' = config.toml unreadable, NOT 'none')" >&2
+        echo "[preflight]" >&2
+        echo "[preflight] Compose keys a project by NAME, not by directory. If that node is not the one" >&2
+        echo "[preflight] this kit copy created, starting it here runs YOUR binary against SOMEONE ELSE'S" >&2
+        echo "[preflight] chain state and validator key — divergence, and a double-sign is not forgiven." >&2
+        echo "[preflight]" >&2
+        echo "[preflight] Pick one:" >&2
+        echo "[preflight]  a) It IS your node: add  DENDRA_ADOPT_EXISTING_HOME=1  to this directory's .env" >&2
+        echo "[preflight]     (once — that file is per-kit-copy and is not published)." >&2
+        echo "[preflight]  b) You want a SEPARATE node: set DENDRA_PROJECT / DENDRA_P2P_PORT /" >&2
+        echo "[preflight]     DENDRA_RPC_PORT / DENDRA_REST_PORT / DENDRA_NODE_IMAGE in .env. A distinct project" >&2
+        echo "[preflight]     gets its own volume, so it syncs from scratch; a port left at its default collides." >&2
+        echo "[preflight]  c) You are done with that node (for example it belongs to an EARLIER network)." >&2
+        echo "[preflight]     NOT for a re-run of join.sh on the network this node already follows: that is a)." >&2
+        echo "[preflight]     Back up its keys first: config/, and keyring-test/ where it exists (a validator's" >&2
+        echo "[preflight]     operator key; a bonded stake can only be undelegated with it). This copies the whole" >&2
+        echo "[preflight]     home except the chain data, so it holds whichever of the two exist. From the repository root:" >&2
+        echo "[preflight]       ( umask 077; docker compose -f deploy/testnet-node/docker-compose.yml -p $${DENDRA_PROJECT_NAME} run --rm --no-deps -T --entrypoint tar preflight -C /root/.dendra --exclude=./data -cf - . > node-keys-backup.tar )   # 0600: it holds the node's keys" >&2
+        echo "[preflight]       tar tf node-keys-backup.tar    # must list ./config/priv_validator_key.json" >&2
+        echo "[preflight]     then remove the node AND its volume:" >&2
+        echo "[preflight]       docker compose -f deploy/testnet-node/docker-compose.yml -p $${DENDRA_PROJECT_NAME} down -v" >&2
+        echo "[preflight]     Without -v the volume stays, and the next start is refused again for the same reason." >&2
+        echo "[preflight]  d) It IS your node and the network was RESET (new genesis): add BOTH" >&2
+        echo "[preflight]     DENDRA_ADOPT_EXISTING_HOME=1 and DENDRA_AUTO_RESET_ON_GENESIS_CHANGE=1 to .env." >&2
+        echo "[preflight]     The node then drops the old chain data and keeps its keys; it refuses instead if" >&2
+        echo "[preflight]     its validator key has ever signed a block. Both are standing settings." >&2
+        exit 78
+
+  node:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.node
+    # Variable so a second, experimental node does not retag the image the FIRST one restarts onto.
+    # Measured on this machine: rebuilding this tag from another tree replaced the image the running
+    # container had been created from, and the original was gone. `restart:` then brings the live node
+    # back on a binary nobody chose.
+    image: ${DENDRA_NODE_IMAGE:-dendra/node:latest}
+    depends_on:
+      preflight:
+        condition: service_completed_successfully
+    environment:
+      CHAIN_ID: "${CHAIN_ID}"
+      MONIKER: "${MONIKER}"
+      GENESIS_URL: "${GENESIS_URL}"           # operator's public genesis.json
+      GENESIS_SHA256: "${GENESIS_SHA256:-}"   # expected sha256 (network-info.txt) -> anti-MITM check of the downloaded genesis
+      # Both accept a COMMA-SEPARATED LIST — name every peer the operator publishes, not just the
+      # first. node-join.sh substitutes the whole string into config.toml, so a list works as-is.
+      SEEDS: "${SEEDS}"                        # <node_id>@<host>:26656,...
+      PERSISTENT_PEERS: "${PERSISTENT_PEERS:-}"
+      # Advertised to PEERS so they can dial back. Compose forwards only what it names, which is
+      # why this line has to exist at all: without it the container never sees the value. Empty
+      # means advertise nothing — the correct state behind NAT. node-join.sh REFUSES a wildcard or
+      # a private address rather than gossiping one.
+      DENDRA_EXTERNAL_ADDRESS: "${DENDRA_EXTERNAL_ADDRESS:-}"
+      DENDRA_VRF_KEY_FILE: "${DENDRA_VRF_KEY_FILE:-}"   # validator VRF key (vote-extensions), read by dendrad
+      # If the operator resets the network (new genesis), this node would otherwise keep running the OLD
+      # chain forever, reporting `catching_up: false` while frozen on a dead fork.
+      # node-join.sh now refuses to start on that divergence. Set this to 1 to let it wipe the local chain
+      # state and resync instead (KEYS ARE KEPT — only the chain data is dropped). Must be listed HERE:
+      # compose only forwards the variables it names, so an unlisted escape hatch is unreachable.
+      DENDRA_AUTO_RESET_ON_GENESIS_CHANGE: "${DENDRA_AUTO_RESET_ON_GENESIS_CHANGE:-0}"
+      # EXPLICIT opt-out of the anti-MITM genesis verification (node-join.sh) — trusted networks ONLY.
+      # It must be listed here: compose only forwards the variables it names, so an operator who set the
+      # flag in .env would watch the node refuse to start regardless, and look for the cause in the
+      # genesis rather than in the compose file.
+      DENDRA_ALLOW_UNVERIFIED_GENESIS: "${DENDRA_ALLOW_UNVERIFIED_GENESIS:-0}"
+      # The chain REFUSES a genesis whose emission Reserve counter is not backed by the module account.
+      # The genesis this network currently serves is exactly that (the 3.3e12 sit on an ordinary
+      # account), so a node built from source panics at InitChain with EXIT=2 while the running chain
+      # carries on — it never replays InitGenesis. Refusing to CREATE such a chain is protective;
+      # refusing to JOIN one that already exists repairs nothing. Set to 1 to join anyway and get a
+      # logged warning instead: rewards stay unreachable until the network restarts from a corrected
+      # genesis. Listed HERE for the same reason as the two above — compose forwards only what it names.
+      DENDRA_ALLOW_UNBACKED_RESERVE: "${DENDRA_ALLOW_UNBACKED_RESERVE:-0}"
+      # STATE-SYNC — required as soon as the chain has taken a consensus-breaking change: replaying the
+      # history would recompute an AppHash different from the signed one, and panic. deploy/join.sh derives
+      # these values over TLS from the servers docker/STATESYNC_RPC names in the clone, never from
+      # network-info.txt. Left empty they mean ordinary replay. STATESYNC_GENESIS_SHA256 is the genesis the
+      # trust point was derived under: node-join.sh applies it to that genesis only. Listed HERE because
+      # compose forwards ONLY what it names — an unlisted variable never reaches the container, and the
+      # guard depending on it becomes unreachable.
+      STATESYNC_RPC: "${STATESYNC_RPC:-}"
+      STATESYNC_TRUST_HEIGHT: "${STATESYNC_TRUST_HEIGHT:-}"
+      STATESYNC_TRUST_HASH: "${STATESYNC_TRUST_HASH:-}"
+      STATESYNC_GENESIS_SHA256: "${STATESYNC_GENESIS_SHA256:-}"
+    # HOST port on the left, container port on the right. Only the HOST side is a variable: the node
+    # listens on 26656/26657 inside the container whatever you publish it as. Defaults are the former
+    # literals, so nothing moves for an operator who sets nothing. ⚠ Changing DENDRA_P2P_PORT does NOT
+    # change what the node ADVERTISES to peers — it announces the port from `external_address`, which
+    # this kit does not manage (see README, "Availability and peer redundancy"). A second node on a
+    # different P2P host port is reachable for you and invisible to the network until you set that field.
+    # ⛔ THE RPC LINE BELOW SAID "local RPC" AND WAS NOT LOCAL. A published port with no bind address
+    # is published on 0.0.0.0, i.e. every interface. On a home machine behind a router that is invisible;
+    # on a rented VPS — which is where anyone hosting a public relay puts it — it is an unauthenticated
+    # RPC open to the internet: anyone can submit transactions, enumerate the topology and run expensive
+    # queries. It does not expose the signing key (that is a file), but it is a standing invitation, and
+    # the comment claiming otherwise is how it survived. Measured on this network's own second node.
+    #
+    # THE RPC IS NOW PUBLISHED ON LOOPBACK BY DEFAULT, AND A CO-LOCATED MINER LOSES NOTHING. It used to stay
+    # on every interface because the miner container reached this node through `host.docker.internal`, the
+    # Docker bridge gateway, which a loopback bind cuts off. The miner no longer goes through the host: it
+    # joins the `chain` network below and dials this node by its alias, container to container
+    # (deploy/testnet-miner/docker-compose.local-node.yml, enabled by deploy/join.sh). A container port is
+    # reachable on a Docker network whatever the host publishes, so the bind address only decides who can
+    # reach the RPC from OUTSIDE Docker:
+    #   127.0.0.1 (default)         -> this host only: its tools, the desktop application, the miner kit.
+    #   DENDRA_RPC_BIND=0.0.0.0     -> every interface. DECLARE it only if this node serves a public RPC
+    #                                  (an operator's DENDRA_NODE, a state-sync source for joiners), and
+    #                                  know that /net_info and /dump_consensus_state are then anyone's.
+    # A miner kit generated by an older join.sh still points at host.docker.internal and goes blind behind
+    # a loopback bind: re-run deploy/join.sh, which rewrites it to the alias.
+    #
+    # REST (1317) is published on LOOPBACK ONLY, and, unlike the RPC's bind address, it is not a knob: its one
+    # host-side consumer is the desktop application on this same host, which reads http://127.0.0.1:1317. A
+    # container on the `chain` network reaches it by the alias. An API nobody on the network needs is not
+    # handed to the network. DENDRA_REST_PORT moves the HOST side only, for a second node on the same machine.
+    ports:
+      - "${DENDRA_P2P_PORT:-26656}:26656"   # P2P (inbound: helps the network — this one is MEANT to be open)
+      - "${DENDRA_RPC_BIND:-127.0.0.1}:${DENDRA_RPC_PORT:-26657}:26657"
+      - "127.0.0.1:${DENDRA_REST_PORT:-1317}:1317"
+    # THE MINER'S WAY IN. `chain` is a Docker network OWNED by this kit (created by its `up`, named
+    # `dendra-chain` whatever the project), that a miner kit on the same host joins as an EXTERNAL network.
+    # On it this node answers to its compose PROJECT name (`dendra-node` unless DENDRA_PROJECT or -p says
+    # otherwise), which is what deploy/join.sh reads back from `docker compose config` and writes into the
+    # miner's DENDRA_NODE. Two node projects on one host each answer to their own name. A `down` of this kit
+    # while a miner is still attached keeps the network (compose reports "Resource is still in use") and the
+    # next `up` reuses it; with nothing attached, `down` removes it.
+    # `default` stays listed: naming any network replaces the implicit default, and the preflight shares it.
+    networks:
+      default: {}
+      chain:
+        aliases: ["${COMPOSE_PROJECT_NAME:-${DENDRA_PROJECT:-dendra-node}}"]
+    volumes:
+      - "node-data:/root/.dendra"             # persistent chain state
+    restart: unless-stopped
+    # On SIGTERM the node closes the consensus WAL and four leveldb stores before exiting; docker's
+    # default grace period is 10s, after which it sends SIGKILL mid-close. The exact close duration
+    # was NOT measured (the node log carries minute granularity only), so this is a CEILING, not a
+    # target: docker proceeds as soon as the process exits, and a slow close costs nothing here.
+    stop_grace_period: 60s
+    # Without this the json-file log grows without bound. Measured on the operator's own node, whose
+    # container was created 6 days earlier: 593055 log lines retained, with `LogConfig.Config` empty
+    # (no max-size), the last 40000 lines alone weighing 9114885 bytes; a full `docker logs` dump did
+    # not complete within 120s. Rotation keeps `docker logs` usable when you need it to diagnose.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  node-data: {}
+
+networks:
+  # A FIXED name, not prefixed by the project: the miner kit names it as an external network, and a
+  # project prefix would make that name depend on DENDRA_PROJECT. A second node project declares the same
+  # network: compose warns that it "was not created for project", and both nodes join it under their own
+  # alias.
+  chain:
+    name: dendra-chain
