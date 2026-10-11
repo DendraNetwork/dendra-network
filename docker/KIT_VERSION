@@ -1,0 +1,35 @@
+2
+# Kit version: the operator-facing surface, meaning what a joiner downloads and runs.
+#
+# Why this is separate from CONSENSUS_EPOCH, and why the two must stay separate.
+# The epoch answers "does my binary apply the same state transitions as this network?". It moves only
+# on a consensus-breaking change, a mismatch is a fork, and join.sh therefore refuses to continue.
+# This number answers a different question: "is the code I run current?". A defect in a script an
+# operator runs breaks that operator and nobody else, so a mismatch here is a warning, never a refusal:
+# a kit one version behind still joins and is told to update.
+#
+# Merging them would force a choice between two wrong behaviours: refusing a joiner over a script fix,
+# or staying silent about a broken one.
+#
+# What a bump is for. A shipped defect had no way to announce itself: the operator ran code that could
+# not do its job, everything looked healthy, and nothing said "update". The epoch could not carry that
+# signal, because nothing about consensus had changed.
+#
+# Bump it when a change alters what an operator runs or how they run it:
+#   - deploy/**: join.sh, hw_probe.sh, the node and miner kits, their compose files
+#   - a service an operator executes: the miner daemon, the judge and reveal workers, capacity_sign
+#   - an image they build, or an environment variable they must now set
+#
+# Do not bump it for:
+#   - network-side services only the project runs (relay, capacity server, faucet, gateway)
+#   - documentation, the site, or internal tooling
+#   - a change no deployed kit can reach: a path of deploy/** taken only once docker/MINER_IMAGE pins an
+#     image, shipped in the same republication as that pin, travels with the pin (ADR-050). Nothing
+#     deployed is behind it, and a bump would void the pin it ships with.
+#
+# A number that moves for everything says nothing: an operator told "you are behind" would only learn
+# that time has passed.
+#
+# How it travels. The network publishes it in `network-info.txt`; `deploy/join.sh` compares that value
+# with line 1 of this file, as it does for the epoch. The published mirror also carries it in its root
+# `VERSION` file, so a clone can answer the question without contacting anyone.

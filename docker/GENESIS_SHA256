@@ -1,0 +1,27 @@
+dendra-testnet=4d69201ea92fe89fa50ac905c5fd99a856444614ab92e09925ad993a390e6aee
+# Genesis pin: line 1 is `<chain_id>=<sha256 of the genesis.json this network serves>`, lowercase
+# hex, nothing else on the line. Everything below is commentary.
+#
+# Why this file exists. deploy/join.sh downloads the genesis at GENESIS_URL and compares it with
+# GENESIS_SHA256, but both come from the same network-info.txt, served by the same host over plain
+# HTTP, and so does CHAIN_ID. Whoever can serve a forged genesis can serve the matching hash beside it.
+# This file is the second source: it reaches an operator through the repository they cloned, not
+# through the host that serves the genesis. Two hosts, one operator.
+#
+# What it protects, and what it does not. It stops a forged genesis: a joiner running this tree refuses
+# any served genesis other than the one named here, whatever network-info says beside it, including its
+# CHAIN_ID line, which unlocks nothing. It does not protect against a compromised operator (who holds
+# both hosts), a compromised repository host, or the other lines of network-info (trust point, RPC
+# endpoint, seeds), which no second source covers.
+#
+# Read by deploy/join.sh (its genesis check): equal -> reported; different -> refused; missing or malformed
+# -> refused as well, since every published path runs from a clone that carries this file. The one
+# named opt-out is DENDRA_ALLOW_UNVERIFIED_GENESIS=1, for a network the operator already trusts.
+# The operator's own checks re-read this line against what the genesis host declares and serves; a
+# stale pin shows up there, not in this file.
+#
+# It changes with every new genesis. A relaunch produces a new genesis and a new hash; the launcher
+# rewrites line 1, which must then be committed and republished together with the genesis, or every
+# joiner is refused a legitimate network (the refusal names this cause first). It is keyed on chain_id,
+# not on the consensus epoch: the epoch describes the state machine, this hash describes one instance
+# of a chain, and a fresh genesis at an unchanged epoch is possible.

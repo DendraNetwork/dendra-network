@@ -1,0 +1,47 @@
+# Docker build context of the public repository.
+#
+# The Dockerfiles build from the root (`context: .`) and copy only `chain/`, `services/` and
+# `docker/`. Everything else is dead weight sent to the daemon on every build, and the chain state
+# of a running node can weigh gigabytes.
+#
+# Never exclude `chain/`, `services/` or `docker/`: they are the only sources of the `COPY` steps.
+.git
+.github
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.log
+*.bak
+
+# Runtime-produced state: never a build input, always bulky.
+chain-data/
+node_data/
+ollama-models/
+tokenomics/*.json
+tokenomics/*.log
+
+# Documentation and web wallet: served as-is, never copied into an image.
+docs/
+wallet/
+
+# Build-integrity marker of the mirror: it describes the manufacturing, not the product.
+.build-complete
+
+# Operator secrets. The whole build context is handed to the Docker daemon and lands in the layer
+# cache, whether or not a `COPY` instruction names the file. `deploy/testnet-miner/.env` is created by every operator
+# who follows the miner README, and it carries the relay token.
+#
+# The patterns cover each family of names, not one canonical name: `*.bak` above only matches names
+# ending in `.bak`, so a rotation backup such as `.env.bak-20260802-034827` would get through, and
+# `*.key` does not match `.webui_secret_key`, which ends in `_key`.
+**/.env
+**/.env.*
+**/*.env.bak*
+**/*secret_key*
+**/*.secret
+**/*.pem
+**/*.vrf
+# Templates are not secrets and must stay in the context: `**/.env.*` would otherwise exclude them, and an
+# exclusion so broad that it quietly breaks a build is barely better than one that is too narrow.
+!**/.env.example
+!**/*.env.example
