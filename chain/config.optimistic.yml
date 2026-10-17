@@ -1,0 +1,277 @@
+# ============================================================================
+# config.optimistic.yml — committed optimistic genesis
+# ============================================================================
+# Purpose: make the live slash proof replayable by a third party straight from
+# the repository. Identical to config.yml except that the jobs.params block
+# turns on optimistic verification plus the fee hold (verification_mode=1,
+# hold_bps=10000, timeouts sized so the resolve deadline cannot precede the
+# dispute window).
+#
+# The default config.yml stays on redundant k=3: this separate file changes
+# neither the default nor any other launcher. Run the demo with:
+#   ignite chain serve -c config.optimistic.yml   (from chain/)
+# (this genesis enables optimistic verification; the published slash proof is deploy/launch/cheat_public.sh).
+#
+# Keep this in sync with config.yml whenever that file changes: jobs.params is
+# the only block that legitimately differs. The activation values follow the
+# production activation runbook, which lives in the development repository.
+#
+# This is not the genesis the public endpoint runs. Read this before comparing.
+# The public network's genesis is built at deploy time by docker/entrypoint-chain.sh, which starts
+# from the binary defaults and patches them from environment variables. Several values therefore
+# differ from this file on purpose: `audit_sample_bps` is 10000 here (every settled job selected, so
+# the demo slash is deterministic), and there it comes from `DENDRA_AUDIT_SAMPLE_BPS`. To check what
+# the live chain runs, query it: `dendrad query jobs params -o json`. To check what a deployment will
+# set, read docker/entrypoint-chain.sh rather than this file.
+# What this file is: a committed, replayable genesis for the slash demonstration, and the written
+# record of why each optimistic-mode parameter holds the value it holds. The reasoning below applies
+# to both paths; the numbers do not all transfer.
+# ============================================================================
+version: 1
+validation: sovereign
+default_denom: udndr
+build:
+  main: cmd/dendrad  # disambiguates the chain main (cmd/dendra-vrf is a second main)
+accounts:
+- name: alice
+  coins:
+  - 2700000000000udndr      # 2.7 M — validator (1 M bonded)
+- name: bob
+  coins:
+  - 100000000000udndr       # 0.1 M — faucet float (the Reserve itself lives in x/emission)
+- name: community
+  coins:
+  - 3400000000000udndr      # 3.4 M (0.1 M of it moved to bob's faucet float)
+- name: team
+  coins:
+  - 500000000000udndr       # 0.5 M
+# The reserve (33 % = 3.3 M DNDR) is held by the x/emission module account from genesis on (ADR-023).
+- name: emission_reserve
+  address: dendra1q6tym5h6cd3cxcqua9eflkf5rct8c6rsn92wrf
+  module_name: emission
+  module_permissions: []
+  coins:
+  - 3300000000000udndr      # 3.3 M — the Reserve
+client:
+  openapi:
+    path: docs/static/openapi.json
+faucet:
+  name: bob
+  coins:
+  - 10000000udndr
+validators:
+- name: alice
+  bonded: 1000000000000udndr
+genesis:
+  app_state:
+    staking:
+      params:
+        bond_denom: udndr
+    # Consensus downtime. The three genesis paths of this repository hold identical values on purpose
+    # (this file, config.yml, docker/entrypoint-chain.sh), and the full reasoning is written once, in
+    # docker/entrypoint-chain.sh, next to the fatal range guard that enforces it. Read it there.
+    #
+    # What matters here, in the unit the chain counts. `HandleValidatorSignature` computes
+    #     maxMissed := signedBlocksWindow - round(signedBlocksWindow * minSignedPerWindow)
+    # (cosmos-sdk, x/slashing/keeper/infractions.go::HandleValidatorSignature, a dependency outside
+    # this tree, cited by symbol because a line number there moves with every SDK bump)
+    # and jails plus slashes above it.
+    # Left unwritten, a genesis inherits the SDK defaults (window 100, min_signed 0.5), so maxMissed is
+    # 50 and the 51st missed block jails the validator and burns 1 % of its stake. That is 4 min 17 at
+    # the 5.03 s per block measured on the public endpoint, shorter than a router reboot or an image
+    # pull, and a jailed node also drops out of the VRF contributor count the committee draw depends on.
+    # 10000 - 8500 = 1500 blocks of tolerance instead, about 2 h 06 under that same measured interval.
+    # slash_fraction_downtime drops to 0.05 % because the jail itself is what removes an unreliable
+    # validator: instant exit from the set, no rewards, no VRF contribution, and a manual MsgUnjail to
+    # come back. The token slash only has to make that exit non-free; it fires once per jail event, so
+    # a large fraction cannot be justified by accumulation. slash_fraction_double_sign stays at 0.05:
+    # downtime is an accident, equivocation is not.
+    # Blocks are the parameter. Every duration above names the interval it assumes, and that interval
+    # is not a consensus rule: re-measure it before quoting a minute figure anywhere else.
+    slashing:
+      params:
+        signed_blocks_window: "10000"
+        min_signed_per_window: "0.850000000000000000"
+        downtime_jail_duration: "600s"
+        slash_fraction_double_sign: "0.050000000000000000"
+        slash_fraction_downtime: "0.000500000000000000"
+    # There is deliberately no mint section: x/mint is unregistered from the app, so zero mint is a
+    # structural property of the binary. A genesis section for an unregistered module fails at boot.
+    crisis:
+      constant_fee:
+        denom: udndr
+    gov:
+      params:
+        min_deposit:
+        - denom: udndr
+          amount: '100000000'
+        expedited_min_deposit:
+        - denom: udndr
+          amount: '200000000'
+    jobs:
+      params:
+        avail_epoch_blocks: "300"    # ADR-022. The availability-slash calibration assumes 300 blocks; at 16 blocks
+                                     # an honest outage of ~8 epochs is >= k, which is a false slash. This also sets
+                                     # the AvailPool payout cadence (300 blocks rather than 16, which would be spam).
+                                     # The minutes below are an assumption; the blocks are the parameter. This
+                                     # calibration reads 300 blocks as ~5 min, i.e. 1 s per block, which is the
+                                     # x/chaintime target and is not enforced by consensus. A measurement on
+                                     # the public endpoint gave about 5 s per block, so the same 300 blocks are
+                                     # ~25 min and the deadline below is ~12.5 min, not 2.5. The block values
+                                     # stay as they are on purpose: changing them takes an ADR-022 decision.
+                                     # Re-measure the interval before arming anything here.
+        avail_payout_bps: "2000"
+        avail_require_demand: true   # anti-farming: only miners that served demand draw from the AvailPool
+        # --- ADR-022 in full: slashable availability (liveness), over a sliding 64-bit bitmask window. The
+        # sliding window replaces a tumbling one, which could be gamed around the reset; Validate requires
+        # W <= 64 at arming time.
+        # Dormant (avail_slash_bps=0) until a live soft-launch proves the absence of false positives.
+        # Arming it, once proven, means writing all of these in one change, at the sliding-window calibration
+        # (bench-results/avail-slash-calibration-sliding.json; the k=4/W=20 tumbling values are obsolete):
+        # avail_deadline_blocks="150" (generous; 2.5 min at 1 s per block, ~12.5 min at the 5 s measured),
+        # avail_fail_k="5", avail_fail_window="25" (survives the measured 16 % failure series and an outage
+        # of ~20 min at 1 s per block, proportionally longer otherwise), avail_slash_bps="500" (5 % burned),
+        # avail_slash_max="0". Operator bar ~99 % uptime (honest bleed ~0.5 %/year). All of them stay
+        # dormant (0) below until then.
+        avail_slash_bps: "0"
+        avail_deadline_blocks: "0"
+        avail_fail_k: "0"
+        avail_fail_window: "0"
+        avail_slash_max: "0"
+        # --- Committed optimistic activation (the live slash, replayable from the repository) ---
+        verification_mode: "1"        # k=1 (the primary is paid) + sampled audit + hard slash (ADR-025)
+        # This is a sampling rate; it does not guarantee that an audit runs. It selects every settled job
+        # for audit; whether the committee is actually drawn is gated further down by `committee_seed_source`,
+        # and on a network below the VRF-contributor floor the draw defers (see the note at the end of this
+        # block). "100 % sampled" and "100 % verified" are two different statements.
+        audit_sample_bps: "10000"     # 100 % sampled: the slash is visible and deterministic for the demo (a deployment sets its own rate)
+        dispute_window: "10"          # window before adjudication (Validate requires >0 in mode 1)
+        audit_resolve_timeout: "120"  # must exceed dispute_window and greatly exceed 3x(grace x poll) at block_time ~1 s
+        hold_bps: "10000"             # full fee hold -> strict "never the bond": an honest miner below the floor is still made whole
+        appeal_window: "0"            # permissionless appeal dormant; set >0 to arm late reveal
+        # Veto: a hard slash requires an "invalid" supermajority. The effective bar is
+        # max(this value, ceil(2/3 x anchored seats)) and a stake majority (`auditRelativeBar` and
+        # `auditSlashDecision`, x/jobs/keeper/antievasion.go). This value is a lower bound on the bar:
+        # the draw produces `audit_committee_draw_size` seats (15 at 0, the compiled default
+        # x/jobs/keeper/audit_committee.go::auditCommitteeDrawSize), so ceil(2/3 x 15) = 10 governs a full
+        # committee and 4 binds only when the anchored committee is smaller. A quorum above the draw size
+        # raises the draw size, so the slash stays reachable without a manually maintained ceiling
+        # (x/jobs/keeper/audit_committee.go::drawAuditCommittee). Below the bar there is neither slash
+        # nor vindication; and when the eligible jury pool itself is under the floor the audit is
+        # deferred with nothing charged to the primary (x/jobs/keeper/audit_jury_floor.go). A blatant
+        # cheater still loses to a unanimous committee; an honest miner misjudged by a minority is protected.
+        audit_min_quorum: "4"
+        # Silence penalty: set, and applied by no code path. The value below is non-zero and no
+        # production line reads it. `silence_slash_bps` is consumed only in the `muteSignal` branch of
+        # `x/jobs/keeper/antievasion.go::clawbackPayment`, and that function has no caller: a missing
+        # quorum defers the audit instead of clawing back the primary. Without a quorum there is no
+        # verdict, only an audit that did not take place, so the fee stays held, the stake intact, and a
+        # new deadline is set (`resolveDisputedAudit`, default branch, x/jobs/keeper/audit_sampling.go).
+        # The parameter is therefore inert rather than dormant: a governance vote raising it would pass
+        # and change nothing, which is why the distinction is written here instead of left to inference.
+        # What punishes a mute primary is the slash branch, where ceil(2/3) of "0" verdicts
+        # posted against a missing reveal forms a cheating quorum. Staying mute has a cost; this
+        # parameter is not where that cost comes from.
+        # What would make it active again: a production caller for `clawbackPayment`, and nothing else.
+        # ADR-038 3(c) weighs that decision and declines it (the penalty presupposes a payment the
+        # silent party never received); `TestADR038SilenceSlashHasNoProductionCaller` turns red in both
+        # directions: when a caller appears, or when the function disappears.
+        silence_slash_bps: "2000"     # inert: kept as a proto field, applied by no code path
+        # --- Cross-requirements of optimistic mode (Params.Validate rejects these at zero) ---
+        dispute_bond: "1000"          # = min_stake. Challenging escrows this bond and forfeits it if the dispute is
+                                      # unfounded; at 0 the anti-grief forfeiture confiscates nothing and disputing
+                                      # every settled job costs only gas.
+        committee_reveal_delay: "1"   # Deferred reveal: the committee seed is empty at open and freezes at H+1 on the
+                                      # AppHash of that future block. Without it (and without committee_seed_source=1)
+                                      # the seed is fixed on `height:time`, two quantities the job creator observes, so
+                                      # it can reopen until it draws a committee it likes. Operational consequence: a
+                                      # commit is only admissible after the reveal block.
+        # Anti-grinding stops two different attackers, and these two settings are not interchangeable.
+        # `committee_reveal_delay` above stops the job creator: the seed freezes on the AppHash of a
+        # future block, which the creator cannot observe when it opens the job, so reopening until the
+        # committee suits it buys nothing.
+        # `committee_seed_source` stops the block proposer, and nothing else does. Without a
+        # decentralised seed, `committeeBaseSeed` falls back to AppHash(H-1):h, a value the proposer of
+        # block h knows before proposing. It can compute the favourable draw off-chain and then choose
+        # whether to inject the vote extensions: two seeds to pick from at every block it proposes.
+        # On a single-validator network that attacker is the operator itself, so it looks harmless; the
+        # network exists to gain other validators, though, and the setting is fixed at genesis.
+        committee_seed_source: "1"            # a draw happens only on a decentralised seed; otherwise it is deferred
+        committee_min_vrf_contributors: "2"   # below this floor the seed falls back, and the draw defers with it
+        # What this costs: on a single-validator network no decentralised seed can exist
+        # (one contributor is below the floor of two), so audit draws are deferred there, and such a network
+        # serves inference without verifying it. The backlog drains by itself as soon as a second operator
+        # anchors a VRF key. `deferred_no_jury` is what publishes that state: "the network serves, it does
+        # not verify yet, N operators missing". A visible, self-healing gap is preferred to a draw whose
+        # randomness one participant controls, which would read as a working audit without being one.
+    modelregistry:
+      models:
+        - id: "llama3.1:8b-instruct-q4_K_M"
+          quant: "Q4_K_M"
+          engine: "ollama"
+          hw_class: "consumer-gpu"
+          active: true
+        - id: "all-MiniLM-L6-v2"
+          engine: "sentence-transformers"
+          active: true
+    # Reserve release, calibrated on the lifetime of the Reserve rather than on how visible one epoch is.
+    #
+    # The curve is geometric: every epoch releases `reserve_release_bps` of what remains, and the work
+    # share that demand does not justify stays in the Reserve (ADR-017). The Reserve therefore halves
+    # without ever emptying, and the only quantity worth calibrating is the half-life. Two regimes bound
+    # it, because the demand gate decides how much of the slice actually leaves:
+    #   - no demand      -> work = 0, half the nominal slice leaves -> half-life ~6932 epochs
+    #   - saturated gate -> the whole slice leaves                  -> half-life ~3466 epochs
+    # Both counts depend only on reserve_release_bps. What turns them into a duration is epoch_blocks.
+    #
+    # Why the epoch is long rather than the rate low. `reserve_release_bps` is a uint64: below 2 bps
+    # the ladder has exactly one rung left, 1 bps, and then 0, which means "stop emitting" and not
+    # "slower". At a 300-block epoch even that last rung still leaves a half-life of ~13863
+    # epochs, i.e. ~4.2 M blocks: weeks to months whatever the block interval turns out to be, never
+    # the multi-year lifetime wanted; that would need ~0.13 bps, which the type cannot express. The
+    # rate cannot be tuned finely enough here; the epoch length can.
+    #
+    # Shipped setting, in the unit the chain agrees on. epoch_blocks = 86400 with reserve_release_bps = 2
+    # halves the Reserve in ~6932 epochs (idle) / ~3466 epochs (saturated), releases 330 / 660 DNDR on the
+    # first epoch of which 198 DNDR to the SecurityPool, and leaves 96.4 % / 93.0 % of the Reserve after
+    # 365 epochs. Every one of those numbers is independent of how long a block takes.
+    #
+    # Wall-clock time, and the hypothesis it rests on. The x/chaintime target is 1 s per block, which
+    # makes an epoch one day and reads the half-lives as 19.0 years (idle) and 9.5 years (saturated).
+    # Consensus does not enforce that target: CometBFT derives the interval from validator `timeout_commit`
+    # and network propagation. A measurement on the public endpoint gave about 5 s per block: same
+    # epochs, 5 days each, half-lives about 95 and 47.5 years. A duration is only meaningful next to
+    # the interval assumed; the epoch counts above are the part that holds. `app/emission_lifespan_test.go`
+    # pins the lifetime band rather than these digits: a setting that drains the Reserve in a handful of
+    # epochs turns it red, a re-calibration inside the band does not. Its band is likewise stated
+    # under the declared interval, not under a measured one. The bps-per-epoch-length table lives in
+    # docs/TOKENOMICS-CALIBRATION.md, which lives in the development repository and is
+    # not part of a published tree.
+    emission:
+      params:
+        reserve_release_bps: "2"
+        work_split_bps: "5000"
+        avail_split_bps: "2000"
+        work_gate_bps: "15000"
+        # 86400 blocks: one day at the declared 1 s target, five days at the interval measured on the
+        # public endpoint. Distinct from jobs.avail_epoch_blocks (300 blocks) above: availability
+        # challenges and their payouts keep their fast cadence, only the Reserve release slows down.
+        # Side effect worth knowing, stated per epoch because the epoch is what does not move: the
+        # non-recoverable demand accumulated between two releases is 288x larger than at 300 blocks, so
+        # the work gate saturates from ~220 DNDR of burns per epoch at the initial Reserve, instead of
+        # being structurally out of reach.
+        epoch_blocks: "86400"
+    bank:
+      denom_metadata:
+      - description: Dendra — staking, fee and reward token
+        denom_units:
+        - denom: udndr
+          exponent: 0
+          aliases:
+          - microdnd
+        - denom: dndr
+          exponent: 6
+        base: udndr
+        display: dndr
+        name: Dendra
+        symbol: DNDR

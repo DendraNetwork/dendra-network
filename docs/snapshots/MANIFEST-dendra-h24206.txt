@@ -1,0 +1,48 @@
+DENDRA SNAPSHOT MANIFEST
+========================
+
+chain_id                 : dendra
+height_H                 : 24206
+block_H_hash             : DCC53AA9AC628B2693FA64C0895F604E0321730AA83BF19F68D4830F612C80A6
+block_H_time             : 2026-08-01T15:46:51.734767718Z
+app_hash_after_H         : E34E7E46649E6248D06DA21A558EAC8C2A391609EA88013D6E3B33A9AD87A04C
+app_hash_source          : header of block 24207 (the app hash of the state after H
+                           appears in the NEXT header; header(H) carries the state
+                           after H-1 and anchors nothing)
+app_hash_cross_checked   : block_results(24206).app_hash, equal
+validators_at_H          : 1
+commit_signatures_at_H   : 1 of 1 slots
+anchor_captured_utc      : 2026-08-01 15:47:06
+chain_height_at_capture  : 24207
+
+app_version_running_node : dev
+app_version_export_binary: dev
+app_version_in_export    : dev
+                           app_version comes from -ldflags
+                           (cosmos-sdk server/export.go: AppVersion = version.Version).
+                           The export digest below is reproducible only with a binary
+                           carrying the same value.
+cosmos_sdk_version       : v0.53.6
+go_toolchain             : go version go1.26.5 linux/amd64
+build_commit             : unknown
+
+state_at_H_jobs          : 6
+state_at_H_miners        : 1
+state_at_H_verdicts      : 2
+state_at_H_held_fees     : 2 job(s), 33936 udndr
+                           "?" means NOT READ, never zero.
+
+binary_bundled           : yes
+
+PIECES (SHA-256)
+d8fdce71ef2c52c977233f83f542ff93c60ea8fc3a8fdc7f85006d5024610e89  ancre.json  anchor readings, cross-checked against this manifest
+fe99b3564581ade51d0d9f58c5a8d5df5fd23ad14725e9010fbf1a9d51df0361  blocs-h24206.tgz  (a) block archive:  data/blockstore.db data/state.db data/tx_index.db data/evidence.db
+7711043065973a45fb8061b967ae38fa57ae164bcc942728466559af3d140b8b  etat-h24206.json  (b) state export at H
+aa85c7fe2ade634616cb790843084328578b3170f03f098fd7974a1db0d862f9  dendrad  (c) binary that produced (a) and (b)
+
+LIMITATION
+NON-REPUDIATION. An app hash signed by a single validator operated by the project is
+signed by the project. This snapshot is a dated commitment its author can no longer
+withdraw. It is not evidence against its author, and the signature alone establishes
+nothing a reader could hold the project to. A reader who wants more replays the blocks
+with the published binary and compares the digests themselves.
