@@ -1,0 +1,63 @@
+# Line endings, pinned where a carriage return breaks a file instead of merely looking odd.
+#
+# `core.autocrlf` is a per-machine git setting, so without this file the bytes your clone receives
+# depend on how your git is configured rather than on what this repository stores. Every path below
+# is stored here with LF; on a machine where `core.autocrlf` is enabled (the default of git on
+# Windows) a checkout rewrites them to CRLF, and the joining kit stops working before it does
+# anything:
+#
+#     $ bash deploy/hw_probe.sh
+#     set: usage: set [-abefhkmnptuvxBCEHPT] ...
+#     deploy/hw_probe.sh: line 20: $'\r': command not found
+#     deploy/hw_probe.sh: line 22: syntax error near unexpected token `$'in\r''
+#
+# The carriage return is invisible in an editor, the file looks perfect, and the error names a line
+# that has nothing wrong with it. This applies to `bash script.sh` as much as to `./script.sh`: the
+# shell is parsing the bytes either way, so the shebang is not what saves you.
+#
+# The first group below is what a POSIX shell, `make`, a container runtime or a shell-read config file
+# consumes, where a carriage return breaks the file. Python, Markdown, YAML, JSON and Go are pinned
+# further down for a different reason: there a carriage return breaks the diff, not the file.
+#
+# Check your own clone with:  git ls-files --eol '*.sh' | grep -v 'i/lf'   (empty = nothing to fix)
+
+# Shell scripts: the joining kit, the node/miner/validator helpers, the container entrypoints.
+*.sh                    text eol=lf
+
+# Read line by line by tools that do not strip a carriage return.
+Makefile                text eol=lf
+Dockerfile*             text eol=lf
+docker/Caddyfile        text eol=lf
+
+# Read by a shell and compared as a string: a trailing carriage return makes an equal value unequal,
+# and that failure leaves no error message at all.
+docker/CONSENSUS_EPOCH  text eol=lf
+docker/GENESIS_SHA256   text eol=lf
+docker/KIT_VERSION      text eol=lf
+docker/MINER_IMAGE      text eol=lf
+docker/NODE_IMAGE       text eol=lf
+docker/STATESYNC_RPC    text eol=lf
+docker/CLOUD_IMAGE      text eol=lf
+
+# The HiveOS package: HiveOS sources h-manifest.conf and runs the h-* scripts with bash, and
+# deploy/hiveos/build.sh refuses a carriage return in any of them, so a Windows clone must not add one.
+deploy/hiveos/**        text eol=lf
+
+# Prose and Python are pinned for the diff: a carriage return does not break them (CPython reads CRLF,
+# Markdown does not care), but a contributor on Linux who edits one CRLF file sends back a whole-file
+# change, and the review is unreadable. The rule normalises at check-in, so nobody gets a clone that
+# looks modified before they touch it.
+*.md                    text eol=lf
+*.py                    text eol=lf
+*.yml                   text eol=lf
+*.json                  text eol=lf
+# The chain itself: every Go source and proto definition. Unpinned, a clone on a machine whose
+# `core.autocrlf` is true receives them with carriage returns, and two gits reading such a tree then
+# disagree about what is modified; a build seal was once stamped `-dirty` on a clean commit this way.
+*.go                    text eol=lf
+*.proto                 text eol=lf
+
+# Never end-of-line converted, never diffed as text.
+*.png                   binary
+*.ico                   binary
+*.svg                   text
