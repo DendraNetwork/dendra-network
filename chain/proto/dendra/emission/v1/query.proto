@@ -1,0 +1,54 @@
+syntax = "proto3";
+package dendra.emission.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "dendra/emission/v1/params.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/emission/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/dendra/emission/v1/params";
+  }
+
+  // Pools returns the engine counters: what is left to release, what each claimable pool holds, and
+  // what has already left the module per flow (since epoch 15). The module account balance is
+  // one opaque sum; this is the split that lets a reader check
+  // `balance(emission) == reserve + work_pool + avail_pool` and tell a work payout from a security
+  // transfer.
+  rpc Pools(QueryPoolsRequest) returns (QueryPoolsResponse) {
+    option (google.api.http).get = "/dendra/emission/v1/pools";
+  }
+}
+
+// QueryPoolsRequest is the request type for the Query/Pools RPC method.
+message QueryPoolsRequest {}
+
+// QueryPoolsResponse carries the six counters of the engine. An absent counter reads as 0, which is
+// its value before anything was written to it (a fresh chain, or an upgraded chain before its first
+// payout); proto3 then omits the field, and 0 is the measured value.
+message QueryPoolsResponse {
+  uint64 reserve = 1;                    // udndr left to release
+  uint64 work_pool = 2;                  // released work subsidies not yet claimed
+  uint64 avail_pool = 3;                 // released availability rewards not yet paid
+  uint64 security_distributed_total = 4; // security share sent to fee_collector, cumulative
+  uint64 work_paid_total = 5;            // paid out of work_pool, cumulative
+  uint64 avail_paid_total = 6;           // paid out of avail_pool, cumulative
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}

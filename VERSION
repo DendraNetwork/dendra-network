@@ -1,0 +1,8 @@
+# Dendra: what this tree is. Generated at publication; do not edit by hand.
+# kit_version     : the operator surface. A mismatch is a warning, never a refusal.
+# consensus_epoch : the state machine. A mismatch is a fork; join.sh refuses.
+# source_commit   : last commit that touched published content, not the internal HEAD.
+kit_version=4
+consensus_epoch=15
+source_commit=ba4f6d75098b3cb0c527eb5d3b7ad1f2df4d9d8b
+published_at=2026-10-31T06:30:17Z

@@ -1,0 +1,63 @@
+# Standalone node image (dendrad binary) to join a public Dendra testnet and sync the chain.
+# Multi-stage: builds dendrad from chain, then a slim debian runtime. Build context = repository root.
+# A release builds it natively for linux/amd64 and linux/arm64 (.github/workflows/release.yml, job
+# node-image-build), and publishes it only once the dendrad of each platform equals the released binary
+# (.github/node_image_gate.sh). docker/NODE_IMAGE pins the result by digest; deploy/join.sh builds this file
+# from the clone otherwise.
+
+# Every base image is named by the digest of its multi-platform index (one digest, valid on linux/amd64 and
+# linux/arm64). A tag can be moved after the fact; a digest names bytes, and the tag next to it only says
+# which release it was. To move a base, read the new index digest with
+#   docker buildx imagetools inspect <image>:<tag>
+# and replace the tag and the digest together. The node-image-bases guard of the development repository
+# refuses a base without a digest and a compiler that differs from the toolchain line of go.mod.
+
+# --- Stage 1: chain binaries ---
+FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS chainbuild
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# The compiler is the one pinned by the `toolchain` directive of chain/go.mod. The official golang
+# images set GOTOOLCHAIN=local, which turns the directive into a no-op, and `auto` would download whatever
+# toolchain go.mod names at build time. Naming the version here, equal to the directive and to the tag of
+# the base above, means the compiler is the one already in the pinned base and nothing is downloaded. When
+# the directive moves, the tag and digest of the base and this line move with it.
+ENV GOTOOLCHAIN=go1.26.10
+
+# Version stamped into the binary. Without it `dendrad version` prints an empty line and an operator
+# cannot tell which build is running. The injection is the one used by .github/workflows/release.yml:
+# the value travels through -ldflags and is never written into a tracked file, so the tree that gets
+# built is exactly the tree that was checked out.
+#   docker build --build-arg VERSION="$(git describe --tags --match 'v[0-9]*' --always)" \
+#                --build-arg COMMIT="$(git rev-parse HEAD)" -f docker/Dockerfile.node .
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+WORKDIR /chain
+COPY chain/ /chain/
+# -trimpath, -buildvcs=false and CGO_ENABLED=0 mirror the release workflow, so the binary in this
+# image is byte-for-byte the published release binary for the same tag and platform: its SHA-256 can
+# be checked against the release SHA256SUMS.binaries. Dropping any of the three breaks that property.
+# CGO_ENABLED=0 also yields the static binary that the slim runtime stage below expects.
+RUN ( CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+        -ldflags "-X github.com/cosmos/cosmos-sdk/version.Name=dendra \
+                  -X github.com/cosmos/cosmos-sdk/version.AppName=dendrad \
+                  -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION} \
+                  -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT}" \
+        -o /go/bin/dendrad ./cmd/dendrad ) \
+    || ( echo "dendrad build failed -> check ./cmd/dendrad in chain (see docker/README.md)"; exit 1 )
+# dendra-vrf is included in the image so VRF anchoring (keygen/prove) is possible from the
+# container (without it, a joiner would have to compile Go on the host to contribute to the decentralized seed).
+RUN ( CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /go/bin/dendra-vrf ./cmd/dendra-vrf ) \
+    || ( echo "dendra-vrf build failed -> check ./cmd/dendra-vrf in chain"; exit 1 )
+
+# --- Stage 2: node runtime ---
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl coreutils \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=chainbuild /go/bin/dendrad /usr/local/bin/dendrad
+COPY --from=chainbuild /go/bin/dendra-vrf /usr/local/bin/dendra-vrf
+COPY docker/node-join.sh /node-join.sh
+RUN chmod +x /node-join.sh
+EXPOSE 26656 26657 1317
+ENTRYPOINT ["/node-join.sh"]

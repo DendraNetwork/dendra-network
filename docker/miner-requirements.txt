@@ -1,0 +1,23 @@
+# docker/miner-requirements.txt -- the lock of the Python packages in the miner image (docker/Dockerfile.miner).
+#
+# The image installs exactly these files and nothing else: pip runs with --require-hashes, --only-binary=:all:
+# and --no-deps, so a package that is not listed here, a version other than the one named, or a file whose
+# SHA-256 is not listed stops the build. Each line carries the hashes of the wheels for linux/amd64 and
+# linux/arm64 (a pure Python wheel has a single hash, shared by both).
+#
+# The top-level packages are the three the miner imports, named in docker/miner-requirements.in: cryptography,
+# requests and prometheus_client. The other six are their dependencies. The versions are those the image
+# installed before the lock existed.
+#
+# To move a version: download the wheels with the pip of the base image the Dockerfile pins, once natively for
+# linux/amd64 and once with --platform for the manylinux aarch64 tags, write each line as name==version followed
+# by one --hash=sha256:<hex> per wheel, and rebuild the image.
+certifi==2026.10.19 --hash=sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b
+cffi==2.1.1 --hash=sha256:68e62fe11f30d5ca8289242866f0a5291402d8529ca2178ab8afc5c9694ae890 --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf
+charset-normalizer==3.5.2 --hash=sha256:3d31298449090ab8d47b7b1b2a555ff73cac7ed438a08b7ac160980c7ebed649 --hash=sha256:b91363207bd9dc966a691e959bb47f64b30f7ac4b072be9968b366982f7db77c
+cryptography==50.0.2 --hash=sha256:87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04 --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079
+idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+prometheus_client==0.26.0 --hash=sha256:fa93d06737aa02bacd05794768508bb97d2fbee28cb3bca04eaae92f0ca953d6
+pycparser==3.12 --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3

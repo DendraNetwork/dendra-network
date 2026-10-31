@@ -1,0 +1,6 @@
+# docker/miner-requirements.in -- the Python packages the miner imports, by name. docker/miner-requirements.txt
+# locks them and their dependencies, by version and hash. docker/Dockerfile.cloud installs each of them too, since
+# the cloud image runs the same miner code.
+cryptography
+prometheus_client
+requests

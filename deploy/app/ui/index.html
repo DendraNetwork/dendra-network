@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dendra</title>
+<style>
+/* The colours and components of the site's night bands (reference/site): night background, raised
+   cards with a 1 px line, shoot green for what is good and for key figures, one amber, one red. */
+:root { --bg:#0b1110; --card:#111a16; --sunken:#0e1614; --line:#1f2c26; --line-strong:#2c4433;
+        --head:#ecf3e6; --ink:#c2d0bb; --muted:#9fb19a; --accent:#8bc34a; --accent-light:#b6e07a;
+        --live:#3fe3d7; --warn:#e0b24a; --bad:#f08a78; --chip:#18231d; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:14px 24px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:2; }
+header h1 { margin:0; font-size:20px; letter-spacing:.3px; color:var(--head); }
+.pill { padding:3px 10px; border-radius:99px; font-size:13px; background:var(--chip); color:var(--muted); border:1px solid var(--line); }
+.pill.ok { color:var(--accent); border-color:var(--line-strong); } .pill.bad { color:var(--bad); border-color:var(--line-strong); } .pill.warn { color:var(--warn); border-color:var(--line-strong); }
+.pagenav { display:flex; gap:4px 16px; flex-wrap:wrap; padding:10px 24px; border-bottom:1px solid var(--line); background:var(--bg); position:sticky; top:57px; z-index:2; }
+.pagenav a { color:var(--muted); text-decoration:none; font-size:14px; }
+.pagenav a:hover { color:var(--accent-light); }
+html { scroll-padding-top:110px; }
+main { max-width:1100px; margin:0 auto; padding:20px 24px 48px; display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+.card h2 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); font-weight:600; }
+.wide { grid-column:1 / -1; }
+dl { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; }
+dt { color:var(--muted); } dd { margin:0; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.big { font-size:28px; font-weight:600; color:var(--accent); }
+button { font:inherit; padding:7px 14px; border-radius:7px; border:1px solid var(--line-strong); background:var(--chip); color:var(--ink); cursor:pointer; }
+button.primary { background:var(--accent); color:#0b1110; border-color:var(--accent); font-weight:600; }
+button:disabled { opacity:.5; cursor:default; }
+.row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+input { font:inherit; padding:7px 10px; border-radius:7px; border:1px solid var(--line-strong); background:var(--sunken); color:var(--ink); width:100%; }
+select { font:inherit; padding:7px 10px; border-radius:7px; border:1px solid var(--line-strong); background:var(--sunken); color:var(--ink); max-width:100%; }
+.words { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin:12px 0; }
+.word { background:var(--chip); border-radius:6px; padding:6px 8px; font-family:ui-monospace, monospace; }
+.word b { color:var(--muted); font-weight:400; margin-right:6px; }
+.note { color:var(--muted); font-size:13px; }
+.alert { border-left:4px solid var(--warn); padding-left:12px; }
+pre { background:var(--sunken); padding:10px; border-radius:7px; max-height:360px; overflow:auto; font-size:12px; white-space:pre-wrap; font-family:ui-monospace, monospace; }
+code { font-family:ui-monospace, monospace; color:var(--accent-light); background:var(--chip); padding:0 4px; border-radius:4px; }
+.hidden { display:none; }
+.msg { margin-top:8px; font-size:13px; }
+.rules { margin:12px 0 0; padding:0; list-style:none; display:grid; gap:12px; }
+.rules li { border-left:4px solid var(--line); padding-left:12px; }
+.rules li.red { border-color:var(--bad); } .rules li.orange { border-color:var(--warn); } .rules li.green { border-color:var(--accent); }
+.rules .do { margin-top:2px; } .rules a { color:var(--accent-light); }
+.stateword { font-size:20px; padding:5px 14px; }
+ol.steps { margin:8px 0 0; padding-left:20px; display:grid; gap:6px; }
+/* The dashboard: one card per subject. */
+.dashgrid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); margin-top:6px; }
+.dashcard { background:var(--sunken); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:8px; padding:10px 12px; }
+.dashcard.green { border-left-color:var(--accent); } .dashcard.amber { border-left-color:var(--warn); } .dashcard.red { border-left-color:var(--bad); }
+.dashcard h3 { margin:0 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:600; }
+.dashcard p { margin:0; font-size:14px; }
+.dashcard .lv { float:right; font-size:12px; }
+.lv.green { color:var(--accent); } .lv.amber { color:var(--warn); } .lv.red { color:var(--bad); }
+/* Tables: data lines with mono figures. */
+table { border-collapse:collapse; width:100%; margin-top:8px; font-size:14px; }
+th { text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:600; padding:6px 8px 6px 0; border-bottom:1px solid var(--line); }
+td { padding:6px 8px 6px 0; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
+td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace, monospace; font-size:13px; }
+/* The pay chart: bars drawn by this page's script, no library. */
+.chart { display:flex; align-items:flex-end; gap:3px; height:130px; padding:8px 4px 0; background:var(--sunken); border:1px solid var(--line); border-radius:8px; }
+.chart .col { flex:1 1 0; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%; min-width:6px; }
+.chart .bar { width:100%; background:var(--accent); border-radius:2px 2px 0 0; min-height:1px; }
+.chart .bar.zero { background:var(--chip); border-top:2px solid var(--warn); }
+.chart .day { font-size:10px; color:var(--muted); padding-top:3px; font-family:ui-monospace, monospace; }
+/* The explained log. */
+.logline { border-bottom:1px solid var(--line); padding:6px 0; }
+.logline .dot { display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:8px; background:var(--muted); }
+.logline.red .dot { background:var(--bad); } .logline.amber .dot { background:var(--warn); } .logline.info .dot { background:var(--live); }
+.logline .svc { color:var(--muted); font-size:12px; font-family:ui-monospace, monospace; margin-right:8px; }
+.logline button { padding:1px 8px; font-size:12px; margin-left:8px; }
+.logline pre { margin:6px 0 0; max-height:none; }
+</style>
+</head>
+<body>
+<header><h1>Dendra</h1><span id="state" class="pill">loading&hellip;</span><span id="netpill" class="pill hidden"></span></header>
+<nav class="pagenav" aria-label="Parts of this page">
+  <a href="#dashSection">Dashboard</a>
+  <a href="#cardsSection">Cards</a>
+  <a href="#diagSection">Diagnosis</a>
+  <a href="#paySection">Pay</a>
+  <a href="#alertSection">Alerts and log</a>
+  <a href="#statusCard">Details</a>
+</nav>
+<main id="main">
+  <section id="setup" class="card wide hidden">
+    <h2>Set up this machine</h2>
+    <p id="setupHint"></p>
+    <p class="note">The installer prepares Docker and the GPU runtime, downloads the network's settings, creates the miner's key and registers it. It changes nothing without <code>--yes</code>, and lists every change first.</p>
+  </section>
+
+  <section id="dashSection" class="card wide dash">
+    <h2>Dashboard</h2>
+    <p class="msg" id="dashStopped"></p>
+    <div class="row" style="margin-top:0"><span id="dashLevel" class="pill stateword">&mdash;</span><span class="note" id="dashWho"></span></div>
+    <div id="dashGrid" class="dashgrid"></div>
+    <p class="note" id="dashNote" style="margin-top:10px">One card per subject, one sentence each. Green says what was read and is fine; amber says something needs you soon, or was not read; red says the pay, the judge or the network is blocked now. The Diagnosis part below names every problem with its fix.</p>
+  </section>
+
+  <section id="cardsSection" class="card wide dash">
+    <h2>Cards and identities of this machine</h2>
+    <p class="msg" id="cardsStopped"></p>
+    <p class="note" style="margin-top:0">One row per card and its identity: what it serves, the judge's memory as its memory watch read it, the work and pay of the latest ranked day, and its judge. The work of the current day has no figure until the day is final and ranked.</p>
+    <div style="overflow-x:auto">
+    <table id="cardsTable">
+      <thead><tr><th>Identity</th><th>Card</th><th>Serves</th><th>Judge memory</th><th class="num">Requests</th><th class="num">Verdicts</th><th class="num">Windows</th><th class="num">Paid, latest ranked day</th><th>Judge</th></tr></thead>
+      <tbody id="cardsBody"></tbody>
+    </table>
+    </div>
+    <p class="msg" id="cardsMsg"></p>
+    <div class="row"><button id="cardsBtn">Read the cards again</button></div>
+  </section>
+
+  <section id="diagSection" class="card wide dash">
+    <h2>Diagnosis of this miner</h2>
+    <p class="msg" id="diagStopped"></p>
+    <div class="row" style="margin-top:0"><span id="diagWord" class="pill stateword">&mdash;</span></div>
+    <p class="note" style="margin-top:0">Every check the kit already has, read from its existing outputs: the last health report (the self-test's C1 to C12), the judge's memory and seat, the capacity sender's last round, the kit against the network's, the payout record. For each problem: what is wrong, why it matters, and the exact command or setting that fixes it. To measure again instead of reading, use Run now in the Health card.</p>
+    <ul id="diagList" class="rules"></ul>
+    <p class="note" id="diagChecked"></p>
+  </section>
+
+  <section id="paySection" class="card wide dash">
+    <h2>Pay by season day</h2>
+    <p class="msg" id="payStopped"></p>
+    <div class="row" style="margin-top:0">
+      <span class="big" id="payTotal">&mdash;</span>
+      <span class="note" id="payPoints"></span>
+    </div>
+    <div id="payChart" class="chart"></div>
+    <div style="overflow-x:auto">
+    <table id="payTable">
+      <thead><tr><th>Season day</th><th class="num">Requests</th><th class="num">Verdicts</th><th class="num">Windows</th><th class="num">Gross</th><th class="num">Paid</th><th>Why the day paid less</th></tr></thead>
+      <tbody id="payBody"></tbody>
+    </table>
+    </div>
+    <p class="msg" id="payMsg"></p>
+    <p class="note">These figures are the programme's published rankings, the same ones the public my-miner page reads: a day is ranked only once it is final, so the current day has no figure yet. Points are the pay: each testnet DNDR the rankings paid counts as one point. A day is paid to the address the programme has on record, and transferred by the weekly payment.</p>
+  </section>
+
+  <section id="alertSection" class="card wide dash">
+    <h2>Alerts and the log</h2>
+    <p class="msg" id="alertsStopped"></p>
+    <p class="note" style="margin-top:0">When something blocks the pay of the identity on screen, this machine shows a desktop notification, once per problem until it clears (through the machine's notifier, <code>notify-send</code>). The same problems are listed here, with the log of the containers underneath, each line explained in a plain sentence; a line's raw text is one click away.</p>
+    <dl>
+      <dt>Alerts</dt><dd id="alertState">&mdash;</dd>
+      <dt>Last notification</dt><dd id="alertLast">&mdash;</dd>
+      <dt>Notifier</dt><dd id="alertNotifier">&mdash;</dd>
+    </dl>
+    <ul id="alertList" class="rules"></ul>
+    <div class="row"><button id="alertBtn">Turn alerts off</button><button id="logBtn">Read the log</button><button id="logRawBtn">Show the raw log</button></div>
+    <p class="msg" id="alertMsg"></p>
+    <div id="logList" class="hidden"></div>
+    <pre id="logRaw" class="hidden"></pre>
+  </section>
+
+  <section id="statusCard" class="card wide dash">
+    <h2>How is my miner?</h2>
+    <p class="msg" id="detailsStopped"></p>
+    <div class="row" style="margin-top:0"><span id="statusWord" class="pill stateword">&mdash;</span></div>
+    <p id="statusHeadline" style="font-size:17px;font-weight:600;color:var(--head)">&mdash;</p>
+    <ul id="statusRules" class="rules"></ul>
+    <p class="note" id="statusChecked"></p>
+    <p class="note">Green means nothing this application can read is wrong, and every part of it was read. Orange means something needs you soon, or a part could not be read. Red means the miner is not doing its work now, or the network will refuse it. Each line names the rule behind it and the page of the site that settles it.</p>
+  </section>
+
+  <section id="slotsCard" class="card wide hidden">
+    <h2>Identities on this machine</h2>
+    <p class="note">One miner identity per card: each has its own key, stake, 24-word recovery phrase and health. The cards below show the identity selected here; Start, Stop, Restart, Logs, Health, the recovery phrase and Leaving act on it alone.</p>
+    <div class="row" style="margin-top:0"><select id="slotSel"></select></div>
+    <pre id="slotsList"></pre>
+    <div id="slotsMsg" class="msg"></div>
+  </section>
+
+  <section id="recovery" class="card wide hidden">
+    <h2>Your recovery phrase</h2>
+    <p class="msg" id="recoveryWho"></p>
+    <p class="alert">These words are the only way to recover this miner's account and its rewards. Write them on paper, in order. Nobody from Dendra will ever ask for them.</p>
+    <div id="recoveryGate">
+      <p class="note">The words are shown after a confirmation code. Dendra prints the code in the terminal or window that started it, never on this page; a code works once, for a few minutes.</p>
+      <div class="row"><button id="recoveryCodeBtn">Get a code</button><input id="recoveryCode" placeholder="code" spellcheck="false" autocomplete="off" style="max-width:160px"><button class="primary" id="showWordsBtn">Show the words</button></div>
+    </div>
+    <div id="recoveryWords" class="hidden">
+      <div id="words" class="words"></div>
+      <p>To confirm you wrote them down, type the words at these positions. Confirming removes the phrase from this machine: your paper is then its only copy.</p>
+      <div id="ask" class="row"></div>
+      <div class="row"><button class="primary" id="confirmBtn">I wrote it down — remove it from this machine</button></div>
+    </div>
+    <div id="recoveryMsg" class="msg"></div>
+  </section>
+
+  <section id="kitBanner" class="card wide hidden">
+    <h2>Update available</h2>
+    <p class="alert" id="kitBannerText"></p>
+  </section>
+
+  <section id="payoutBanner" class="card wide hidden">
+    <h2>Where the Final Testnet Season pays</h2>
+    <p class="alert" id="payoutBannerText"></p>
+  </section>
+
+  <section class="card dash" id="minerCard">
+    <h2>Miner</h2>
+    <dl>
+      <dt>Identity</dt><dd id="mid">&mdash;</dd>
+      <dt>Address</dt><dd id="addr">&mdash;</dd>
+      <dt>Containers</dt><dd id="ctr">&mdash;</dd>
+      <dt>Role</dt><dd id="role">&mdash;</dd>
+      <dt>Judge</dt><dd id="judgeMemory">-</dd>
+      <dt>Judge seat</dt><dd id="judgeSeat">-</dd>
+      <dt>Keys</dt><dd id="keysAtRest">&mdash;</dd>
+      <dt>Kit version</dt><dd id="kitCheck">&mdash;</dd>
+      <dt>Update</dt><dd id="kitUpdate">&mdash;</dd>
+    </dl>
+    <div class="row">
+      <button id="startBtn">Start</button><button id="stopBtn">Stop</button><button id="restartBtn">Restart</button>
+      <button id="logsBtn">Logs</button>
+    </div>
+    <div id="minerMsg" class="msg"></div>
+  </section>
+
+  <section class="card dash" id="switchCard">
+    <h2>Switches</h2>
+    <dl>
+      <dt>Judge</dt><dd id="judgeState">&mdash;</dd>
+      <dt>GPU mining</dt><dd id="gpuState">&mdash;</dd>
+    </dl>
+    <div class="row"><button id="judgeBtn" disabled>Judge</button><button id="gpuBtn" disabled>GPU mining</button></div>
+    <p class="note" id="judgeWhy"></p>
+    <p class="note" id="gpuWhy"></p>
+    <div id="switchMsg" class="msg"></div>
+    <p class="note">Judge: this identity votes on the audits the chain draws it into, with the network's judge model on the CPU (<code>deploy/testnet-miner/judge.sh</code>); the first seat downloads that model. GPU mining off: the card is left free and the machine keeps answering the requests the chain assigns it, on the CPU with the judge model, more slowly than on the card; the judge stays on while the card is off. Both need a machine that can judge (<code>bash deploy/hw_probe.sh --can-judge</code>).</p>
+  </section>
+
+  <section class="card dash" id="testCard">
+    <h2>Test my machine</h2>
+    <dl>
+      <dt>Speed</dt><dd id="testSpeed">not tested yet</dd>
+      <dt>One verdict</dt><dd id="testVerdict">not tested yet</dd>
+      <dt>Measured</dt><dd id="testWhen">&mdash;</dd>
+    </dl>
+    <div class="row"><button id="testBtn">Test my machine</button></div>
+    <div id="testMsg" class="msg"></div>
+    <p class="note">The test runs inside the miner, with the calls the miner and the judge make: the miner's engine writes one short paragraph (at most 200 tokens) for the speed, in words per second, and the judge decides one verdict on a one-sentence sample for the time. Nothing is sent to the network. The miner answers more slowly while it runs, and the judge model may take minutes to load the first time. A part that cannot run says why and shows no figure.</p>
+  </section>
+
+  <section class="card dash" id="healthCard">
+    <h2>Health</h2>
+    <div class="row" style="margin-top:0">
+      <span id="healthState" class="pill">&mdash;</span><span id="hOk" class="pill ok">&mdash;</span>
+      <span id="hKo" class="pill bad">&mdash;</span><span id="hUn" class="pill warn">&mdash;</span>
+    </div>
+    <dl style="margin-top:10px">
+      <dt>Last checked</dt><dd id="healthWhen">&mdash;</dd>
+    </dl>
+    <pre id="healthList" class="hidden"></pre>
+    <p class="note hidden" id="healthAdviceTitle">Advice &mdash; choices you can change; they are not problems and raise no alert:</p>
+    <pre id="healthAdvice" class="hidden"></pre>
+    <div class="row"><button id="healthBtn">Run now</button></div>
+    <div id="healthMsg" class="msg"></div>
+    <p class="note">The hourly check writes <code>deploy/testnet-miner/miner-health.ALERT</code> only while something is wrong. "Run now" is a quick check: it skips the model probe and the relay check, and writes nothing.</p>
+  </section>
+
+  <section class="card dash" id="reachCard">
+    <h2>Is my node reachable?</h2>
+    <div class="row" style="margin-top:0"><span id="reachState" class="pill">&mdash;</span></div>
+    <p id="reachSays">&mdash;</p>
+    <dl>
+      <dt>Peers</dt><dd id="reachPeers">&mdash;</dd>
+      <dt>Advertised by the node</dt><dd id="reachAdvertised">&mdash;</dd>
+      <dt>Reachable at</dt><dd id="reachAt">&mdash;</dd>
+    </dl>
+    <p class="note hidden" id="reachStepsTitle">To open it (optional):</p>
+    <ol id="reachSteps" class="steps hidden"></ol>
+    <p class="note hidden" id="reachWslTitle">This machine runs in WSL 2 on Windows. The router sends the port to Windows, and Windows has to pass it into WSL:</p>
+    <ol id="reachWsl" class="steps hidden"></ol>
+    <div class="row"><button id="reachBtn">Check now</button></div>
+    <div id="reachMsg" class="msg"></div>
+    <p class="note">Optional: a miner dials out and needs no inbound port. An open port lets other nodes reach yours, which gives the network a second path for its blocks. This card only reads: the steps are yours to run, and the node restart in them pauses the miner above until the node is back. The check reads who connected in; it cannot dial your address from outside, so a node started minutes ago shows no peer yet.</p>
+  </section>
+
+  <section class="card dash">
+    <h2>Account</h2>
+    <div class="big" id="balance">&mdash;</div>
+    <dl>
+      <dt>Registered</dt><dd id="registered">&mdash;</dd>
+      <dt>Stake</dt><dd id="stake">&mdash;</dd>
+      <dt>Subsidy accrued</dt><dd id="subsidy">&mdash;</dd>
+    </dl>
+    <p class="note">The subsidy accrues with the demand this miner served (demand &times; <code>work_gate_bps</code> / 10000, less what was claimed), and the chain pays it from the emission work pool: it can be claimed only once that pool holds funds &mdash; while it is empty the chain refuses the claim until a later emission epoch funds it (<code>msg_server_claim_subsidy.go::ClaimSubsidy</code>). The miner claims by itself once the amount reaches its claim threshold (<code>miner.py::SUBSIDY_MIN</code>).</p>
+  </section>
+
+  <section class="card dash">
+    <h2>Leaving the network</h2>
+    <dl>
+      <dt>Registered</dt><dd id="exitState">&mdash;</dd>
+      <dt>Stake on chain</dt><dd id="exitStake">&mdash;</dd>
+    </dl>
+    <!-- Both notes come from the server (dendra_app.py::exit_notes): in owner mode the stake goes back to the
+         owner and --yes only prepares the exit the owner signs. Until the first reading, they say nothing. -->
+    <p class="note" id="exitHow">&mdash;</p>
+    <pre id="exitCmd">&mdash;</pre>
+    <p class="note" id="exitAfter"></p>
+  </section>
+
+  <section class="card dash">
+    <h2>Final Testnet Season</h2>
+    <dl>
+      <dt>Day</dt><dd id="day">&mdash;</dd>
+      <dt>Ranked days</dt><dd id="ranked">&mdash;</dd>
+      <dt>Earned in published rankings</dt><dd id="paid">&mdash;</dd>
+    </dl>
+    <p class="note">These figures are the programme's published rankings. A day is ranked only once it is final, the chain's <code>audit_unwind_blocks</code> plus a margin after its last block, so the current day has no figure yet. What a ranking assigns is transferred by the weekly payment: read your balance for what has arrived.</p>
+  </section>
+
+  <section class="card dash">
+    <h2>Latest ranked day</h2>
+    <div class="big" id="lastPaid">&mdash;</div>
+    <dl>
+      <dt>Day</dt><dd id="lastDay">&mdash;</dd>
+      <dt>Availability windows proven</dt><dd id="presence">&mdash;</dd>
+      <dt>Verified programme requests</dt><dd id="requests">&mdash;</dd>
+      <dt>Consistent verdicts</dt><dd id="verdicts">&mdash;</dd>
+    </dl>
+    <p id="lastParts" class="msg"></p>
+  </section>
+
+  <section class="card dash wide" id="earnCard">
+    <h2>Earnings by role</h2>
+    <dl>
+      <dt>Work (verified requests)</dt><dd id="earnWork">&mdash;</dd>
+      <dt>Verdicts</dt><dd id="earnJuror">&mdash;</dd>
+      <dt>Presence (availability windows)</dt><dd id="earnPresence">&mdash;</dd>
+      <dt>Judge presence reward</dt><dd id="earnJudge">&mdash;</dd>
+      <dt>Probation (first full day)</dt><dd id="earnProbation">&mdash;</dd>
+      <dt>Gross</dt><dd id="earnGross">&mdash;</dd>
+      <dt>Paid by the rankings</dt><dd id="earnPaid">&mdash;</dd>
+    </dl>
+    <p id="earnCoverage" class="msg"></p>
+    <p id="earnProjection"></p>
+    <p id="earnLimits" class="note"></p>
+  </section>
+
+  <section class="card dash">
+    <h2>Where rewards go</h2>
+    <p class="note">By default to this miner's own address, whose key is on this machine. Choose an address whose key is somewhere else.</p>
+    <p class="msg" id="payoutDeclared"></p>
+    <input id="payout" placeholder="dendra1&hellip;" spellcheck="false" autocomplete="off">
+    <p class="note">Saving takes a confirmation code, printed in the terminal or window that started Dendra, never on this page. Type the address first: the code is given for that address and that identity (or every identity), which the line beside it names.</p>
+    <div class="row" style="margin-top:0"><button id="payoutCodeBtn">Get a code</button><button id="payoutAllCodeBtn" class="hidden">Get a code for every identity</button><input id="payoutCode" placeholder="code" spellcheck="false" autocomplete="off" style="max-width:160px"></div>
+    <div class="row"><button id="payoutBtn">Save</button><button id="payoutAllBtn" class="hidden">Save for every identity</button></div>
+    <div id="payoutMsg" class="msg"></div>
+  </section>
+
+  <section class="card dash wide">
+    <h2>How the Final Testnet Season pays</h2>
+    <p id="formulaNote"></p>
+    <p class="note">Known limits: one card can serve the programme's work for many identities. The number of requests is fixed, and the chain draws them among present identities by stake, each identity's weight capped at <code>assignment_stake_cap_multiple</code> &times; <code>min_stake</code> (<code>committee.go::capAssignmentWeights</code>): stake above that ceiling weighs nothing in the draw. Below the ceiling an identity's share follows its stake, and splitting the stake does not raise it; above it, splitting the stake into identities that each still reach the ceiling does, while a split into identities below the ceiling can lower it. At a multiple of 1 every identity bonded at <code>min_stake</code> or more sits at the ceiling: each weighs the same, a larger stake draws no larger share, and splitting a stake into more identities bonded at <code>min_stake</code> draws a larger share of the work. Governance moves the multiple, so which case applies is a reading of the chain: <code>GET /dendra/jobs/v1/params</code> on a node's REST API, or <code>dendrad query jobs params -o json</code> (a multiple of 0, or absent, selects the compiled 2; a <code>min_stake</code> of 0, or absent, sets no ceiling). At any multiple, splitting also buys presence, and jury seats for each identity that declares a judge: each identity with at least one verified request that day is paid its own presence, and the audit draw, which this ceiling does not touch, seats each identity at most once, so several identities can hold several seats on one programme audit, each paid per consistent verdict. An identity that weighs less in the work draw draws a request, and so earns its presence, on fewer days. A proven window shows an online operator key, not a model.</p>
+  </section>
+
+  <section class="card wide hidden" id="logsCard">
+    <h2>Miner logs</h2>
+    <pre id="logs"></pre>
+  </section>
+</main>
+<script>
+"use strict";
+// The session is a cookie this script cannot read (HttpOnly), set when the launcher's access page was posted
+// to /handoff, and a value /handoff left in this tab's sessionStorage, which a page of another port cannot read:
+// every call below carries the cookie on its own and sends that value (dendra_app.py::Handler._auth). Every answer
+// of this Dendra carries the instance value /handoff left beside it, which this page never sends: an answer
+// without it comes from another program, perhaps one that took the port after Dendra stopped, and the page stops.
+const $ = (id) => document.getElementById(id);
+function kept(name) { try { return sessionStorage.getItem(name) || ""; } catch (e) { return ""; } }
+const SESSION = kept("dendra-session"), INSTANCE = kept("dendra-instance");
+const timers = [];
+let ended = "";
+function endTab(why) {
+  if (ended) return;
+  ended = why;
+  timers.forEach((t) => clearInterval(t));
+  setText("state", why);
+  $("state").className = "pill bad";
+}
+const unread = (v) => v === null || v === undefined;
+const dndr = (u) => unread(u) ? "not read" : (u / 1e6).toLocaleString(undefined, {maximumFractionDigits: 6}) + " DNDR";
+const amount = (u) => (u / 1e6).toLocaleString(undefined, {maximumFractionDigits: 6});
+
+// The formula, written from the rules the server sends (final_season_rules), never restated here.
+function formulaNote(r) {
+  if (!r || unread(r.work_per_request)) return "";
+  return "The Final Testnet Season pays each miner identity, per day, on facts the chain records: " + amount(r.work_per_request) +
+    " DNDR per verified programme request, the same for every miner; " + amount(r.juror_per_verdict) +
+    " DNDR per verdict consistent with the outcome; and " + amount(r.presence_per_window) +
+    " DNDR per availability window proven on chain, at most " + r.presence_max_windows + " a day, paid only on a day " +
+    "with at least one verified request, since proving a window needs no model. A day loses its work reward, and with " +
+    "it its presence reward, when its sampled answers to programme requests are all graded incoherent, on at least " +
+    "two grades (one when a single answer was sampled). There is no cap per identity: the programme pays at most " +
+    amount(r.cap_programme_day) + " DNDR a day, shared pro rata beyond, and " +
+    amount(r.cap_season) + " DNDR over the season. It sends " + r.requests_per_day + " requests a day, which the " +
+    "chain hands out among its present miners, each identity's stake counting only up to the ceiling below.";
+}
+
+// The earnings by role: what the ranked days paid for each fact (the published formula rerun by the server on
+// the published facts), and, from the server's projection, what that comes to by the season's end. The
+// projection names its own window and its end in the same sentence, and promises nothing.
+const EARN_LINES = [["earnWork", "work_udndr"], ["earnJuror", "juror_udndr"], ["earnPresence", "presence_udndr"],
+  ["earnJudge", "judge_udndr"], ["earnProbation", "probation_udndr"], ["earnGross", "gross_udndr"],
+  ["earnPaid", "paid_udndr"]];
+function earnLine(so, more) {
+  if (unread(so)) return "?";
+  return dndr(so) + (unread(more) ? "" : "; projected to the end: " + dndr(more) + " more");
+}
+function projectionText(p) {
+  if (!p) return "";
+  if (!p.available) return "No projection: " + p.why + ".";
+  const days = p.first_day === p.last_day ? "day " + (p.first_day + 1) : "days " + (p.first_day + 1) + " to " + (p.last_day + 1);
+  const head = "At the average of the last " + p.window_days + " ranked day(s) under today's rules (" + days +
+    "; a first-day probation day is left out), this identity is paid " + dndr(p.per_day.paid_udndr) + " a day";
+  const e = p.end || {};
+  if (unread(e.blocks) || !p.to_end) return head + ". The days left to the season's end cannot be counted: " + (e.why || "not read") + ".";
+  const tail = e.how === "last_block"
+    ? "; the season's last block is " + e.end_height + ", so " + e.days + " day(s) are still to be ranked, a part-day counted for its blocks, which comes to "
+    : "; counting about " + e.days + " day(s) to the season's end (the end read from the chain's clock at " + e.block_seconds +
+      " s per block, measured over the last " + e.span_blocks + " blocks, and a part-day counted for its blocks), which comes to ";
+  return head + tail + dndr(p.to_end.paid_udndr) + " more.";
+}
+function renderEarnings(en, r) {
+  const roles = en && en.roles, pr = en && en.projection, to = pr && pr.available ? pr.to_end : null;
+  EARN_LINES.forEach(([id, k]) => setText(id, !roles ? "—" : earnLine(roles[k], to ? to[k] : null)));
+  setText("earnCoverage", !roles || roles.days === roles.of ? "" : "Read for " + roles.days + " of " + roles.of +
+    " ranked days: the others were ranked under rules this application does not know, or their published gross differs from the formula rerun, and are left out of the parts, the gross and the paid sum above.");
+  setText("earnProjection", projectionText(pr));
+  setText("earnLimits", !pr || unread(r.cap_programme_day) ? "" : "A projection, not a promise. The programme pays at most " +
+    amount(r.cap_programme_day) + " DNDR a day to all identities together, shared pro rata beyond, and " + amount(r.cap_season) +
+    " DNDR over the season. The chain draws the work among the miners present, so a day can bring more or less than the average, and the gross becomes paid only if an address, the kit floor and the registration allow it. What a ranking assigns is transferred by the weekly payment.");
+}
+
+// What the latest ranked day's figures come to: the formula rerun by the server on the published facts
+// (`formula`), set against the published gross, then what was payable and paid, and the ranking's own reason.
+function lastParts(L) {
+  const out = [];
+  if (!L.listed) out.push("This identity is not in that day's ranking: no proven window, verified request or verdict was counted for it.");
+  const f = L.formula;
+  if (f) {
+    // The judge presence reward and the probation exist only under the sets that pay them: said when they are not 0.
+    out.push("The formula on these facts: work " + amount(f.work_udndr) + " + juror " + amount(f.juror_udndr) +
+      " + presence " + amount(f.presence_udndr) + (f.judge_udndr ? " + judge presence " + amount(f.judge_udndr) : "") +
+      (f.probation_udndr ? " - probation " + amount(-f.probation_udndr) : "") + " = " + dndr(f.gross_udndr) + " gross" +
+      (f.gross_udndr === L.gross_udndr ? "." : "; the ranking states " + dndr(L.gross_udndr) + ": they differ."));
+  } else if (L.rules_differ) {
+    out.push("That ranking was computed with rules this application does not know (its fingerprint matches none of the rule sets the season published): the formula is not rerun here.");
+  }
+  if (L.payable_udndr !== L.gross_udndr || L.paid_udndr !== L.payable_udndr)
+    out.push("Gross " + dndr(L.gross_udndr) + ", payable " + dndr(L.payable_udndr) + ", paid " + dndr(L.paid_udndr) + ".");
+  if (L.reason) out.push("Reason: " + L.reason + ".");
+  return out.join(" ");
+}
+
+async function api(path, body, headers) {
+  if (ended) return { status: 0, data: {} };
+  const opt = { headers: Object.assign({ "X-Dendra-Session": SESSION }, headers || {}), credentials: "same-origin" };
+  if (body !== undefined) { opt.method = "POST"; opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  let r;
+  try { r = await fetch(path, opt); } catch (e) { return { status: 0, data: {} }; }
+  if (r.status === 401) {
+    endTab("no access: open Dendra from its launcher again (this tab has no session of it)");
+    return { status: 401, data: {} };
+  }
+  if (!INSTANCE || r.headers.get("X-Dendra-Instance") !== INSTANCE) {
+    endTab("Dendra stopped: what answers on this port now is not it. Open Dendra again from its launcher");
+    return { status: 0, data: {} };
+  }
+  let d = {};
+  try { d = await r.json(); } catch (e) {}
+  return { status: r.status, data: d };
+}
+
+function setText(id, v) { $(id).textContent = v; }
+
+// One identity per card. On a machine that runs several, every call names the identity shown (`slot`): the
+// server never acts on slot 0 by default there. On a machine that runs one, the calls are the ones they were.
+let slot = null, multi = false;
+const q = (path) => multi && slot !== null ? path + "?slot=" + slot : path;
+const withSlot = (body) => multi && slot !== null ? Object.assign({ slot: slot }, body) : body;
+function healthWord(h) {
+  if (!h || h.state !== "read") return h && h.state === "never" ? "never checked" : "health not read";
+  return h.rc === 0 ? "all checks ok" : (h.rc === 1 ? "a problem" : "not everything measured");
+}
+function renderSlots(data) {
+  const rows = data.slots || [];
+  $("slotsCard").classList.toggle("hidden", !multi);
+  setText("slotsMsg", data.slots_error ? "The identities of this machine could not be listed: " + data.slots_error : "");
+  if (!multi) return;
+  const sel = $("slotSel");
+  sel.innerHTML = "";
+  rows.forEach(r => { const o = document.createElement("option"); o.value = String(r.slot);
+    o.textContent = "slot " + r.slot + " — " + (r.miner_id || r.project) + (r.state === "active" ? "" : " (" + r.state + ")"); sel.appendChild(o); });
+  sel.value = String(slot);
+  setText("slotsList", rows.map(r => "slot " + r.slot + "  " + r.project + "  " + r.state + "  " + (r.uuid || "no card named") +
+    "  " + (r.miner_id || "—") + "  " + healthWord(r.health) +
+    (r.phrase_to_confirm === true ? "  -- its 24-word recovery phrase is still on this machine: select it to confirm it" : "")).join("\n"));
+}
+
+// The miner's self-test: the script's verdict, never one made here. "never" and "unread" are shown as such:
+// no recorded run is not a healthy miner.
+let lastHealth = null, manualHealth = null;
+function ago(s) { return s < 90 ? s + " s ago" : (s < 5400 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago"); }
+// The result the screen shows: a quick check run here, when it is newer than the scheduled one.
+function effectiveHealth(h) {
+  return (manualHealth && (!h || h.state !== "read" || manualHealth.generated_epoch >= h.generated_epoch)) ? manualHealth : h;
+}
+// A quick check's age now: its age when it arrived (the server's), plus the time this page has kept it since.
+function quickAge(v) { return v.age_s + Math.max(0, Math.floor((Date.now() - (v.received_ms || Date.now())) / 1000)); }
+// The header pill, the answer at a glance, is the state card's level and word: one table decides both
+// (dendra_app.py::STATUS_RULES, through statusRead), so the pill is never green over an orange or red card. The
+// rules on the container, a check that is old or never ran, and a quick check that would hide a stopped schedule
+// are the table's. A server that sends no state (an older one) is "state not read", never green.
+function statusRead(s) { return !!(s && LEVEL_PILL[s.level] && Array.isArray(s.rules)); }
+function headerPill(s) {
+  return statusRead(s) ? { text: s.word, cls: LEVEL_PILL[s.level] } : { text: "state not read", cls: "warn" };
+}
+// The Role line: the judge role the container reported to the last check (data.role.word), never the kit's setting
+// alone -- a judge requested and not read is not a juror that votes.
+function roleText(r) {
+  if (!r) return "not read";
+  if (r.word === "active") return "miner and juror";
+  if (r.word === "off") return "miner — not a juror (the judge is off: its daemon withdraws a declaration the chain holds, so the chain stops drawing it into new juries; see Health, advice A4)";
+  if (r.word === "mute") return "miner — mute juror seat: the judge is requested and gives no verdict (see Health, C11)";
+  return r.requested ? "miner; juror requested — whether it judges was not read" + (r.why ? " (" + r.why + ")" : "")
+    : "miner — not a juror (the judge role is not requested in this kit's settings)";
+}
+// The Judge line: the judge's memory as the daemon's memory watch wrote it (data.judge_memory), in three answers.
+// `read` says the mode (resident: the model stays loaded; on demand: it is loaded for audits only), the guard's gate
+// with its reason, whether the model is loaded and the audits left out for lack of memory; every field it could not
+// read says so. `absent` is a judge that is not requested. Anything else, an older server included, is "not read":
+// a memory nobody read is never shown as a healthy one.
+function judgeMemoryText(m) {
+  if (!m) return "not read";
+  if (m.state === "absent") return m.why || "the judge is not requested in this kit";
+  if (m.state !== "read") return "not read" + (m.why ? " (" + m.why + ")" : "");
+  const mode = m.mode === "resident" ? "resident (the model stays loaded)"
+    : (m.mode === "on-demand" ? "on demand (the model is loaded for audits only)" : "mode not read");
+  const gate = m.gate === "closed" ? "load held back: " + (m.gate_why || "no room for the model")
+    : (m.gate === "open" ? "room to load the model" : "load check not read");
+  const loaded = m.loaded === true ? "model loaded" : (m.loaded === false ? "model not loaded" : "model state not read");
+  const abst = typeof m.memory_abstentions === "number"
+    ? m.memory_abstentions + " audit(s) left out for lack of memory" + (typeof m.counters_since === "number" && m.counters_since > 0
+        ? " since " + new Date(m.counters_since * 1000).toISOString().slice(0, 10) : "")
+    : "audits left out for lack of memory: not read";
+  const oom = (typeof m.unloads === "number" && typeof m.oom_seen === "number" && (m.unloads > 0 || m.oom_seen > 0))
+    ? m.unloads + " emergency unload(s), " + m.oom_seen + " out-of-memory error(s)" : "";
+  const age = typeof m.age_s === "number" ? "read " + ago(m.age_s) : "read at an unknown time";
+  return [mode, gate, loaded, abst, oom, m.paused ? "paused before the next load" : "", age].filter(Boolean).join(" - ");
+}
+// The Judge seat line: what the chain holds about this identity's judge, as the daemon last read it (data.judge_memory.seat).
+// The chain stops drawing a judge seated on `missed_max` concluded audits without an answer; the line says the count, the
+// limit and, at the limit, that the daemon declares the judge again by itself (miner.py::judge_return_action) and the
+// gesture that does it by hand. A seat nobody read is "not read", never a clean count.
+function judgeSeatText(m) {
+  const s = m && m.seat;
+  if (!s) return m && m.state === "absent" ? "the judge is not requested in this kit" : "not read";
+  if (s.state === "unread") return "not read (" + (s.why || "the daemon gave no reading") + ")";
+  const age = typeof s.age_s === "number" ? "read " + ago(s.age_s) : "read at an unknown time";
+  if (s.state === "not_declared") return "the chain holds no judge declaration for this identity, so it is drawn into no jury - " + age;
+  if (s.state !== "declared") return "not read";
+  const n = v => typeof v === "number" ? String(v) : "?";
+  const limit = typeof s.missed_max === "number" ? String(s.missed_max) : "?";
+  let line = "declared at height " + n(s.declared_height) + ", last verdict at height " + n(s.last_verdict_height) +
+    ", missed draws " + n(s.missed_draws) + " of " + limit;
+  if (s.excluded === true) {
+    line += " - excluded from juries: seated on " + s.missed_draws + " concluded audit(s) without an answer. Once the cause is removed (see the Judge line above), " +
+      "the daemon declares the judge again by itself, which clears the count. If it already did once and the count excluded it again with no answer, " +
+      "press Restart on the Miner card, or turn the Judge switch off, then on once the Logs card shows that the daemon withdrew the judge declaration, " +
+      "or bash deploy/testnet-miner/judge.sh status says the chain holds no judge declaration";
+  } else if (typeof s.missed_draws !== "number") {
+    line += " - the missed draws were not read, so whether the chain still draws this judge is not known";
+  } else if (typeof s.missed_max !== "number") {
+    line += " - the chain's limit was not read, so whether " + s.missed_draws + " missed draw(s) exclude this judge is not known";
+  }
+  return line + " - " + age;
+}
+function renderHealth(h) {
+  const v = effectiveHealth(h);
+  if (!v || v.state !== "read") {
+    setText("healthState", !v ? "not read" : (v.state === "never" ? "never checked" : "not read"));
+    $("healthState").className = "pill warn";
+    ["hOk", "hKo", "hUn"].forEach(i => setText(i, "—"));
+    setText("healthWhen", v && v.why ? v.why : "not read");
+    $("healthList").classList.add("hidden");
+    return;
+  }
+  const s = v.summary;
+  setText("hOk", s.ok + " ok"); setText("hKo", s.ko + " ko"); setText("hUn", s.unmeasured + " not measured");
+  setText("healthState", v.rc === 0 ? "all checks ok" : (v.rc === 1 ? "a problem" : "not everything measured"));
+  $("healthState").className = "pill " + (v.rc === 0 ? "ok" : (v.rc === 1 ? "bad" : "warn"));
+  setText("healthWhen", (v.manual ? "quick check, " + ago(quickAge(v)) : ago(v.age_s)) + " (" + v.generated_at + ")" +
+    (v.manual ? "" : v.stale === true ? " -- the scheduled check has not run for two of its periods (" + ago(2 * v.period_s).replace(" ago", "") + "): is cron running?"
+      : v.stale === false ? "" : " -- this result does not say the schedule's period, so its age is not judged"));
+  const bad = (v.checks || []).filter(c => c.state !== "ok");
+  setText("healthList", bad.map(c => (c.state === "ko" ? "FAIL " : "?? ") + c.id + " " + c.name + ": " + c.measured +
+    (c.fix ? "\n   fix: " + c.fix : "")).join("\n"));
+  $("healthList").classList.toggle("hidden", bad.length === 0);
+  // Advice is listed apart and never colours the verdict above: these are choices, not faults.
+  const adv = v.advice || [];
+  setText("healthAdvice", adv.map(a => a.id + " " + a.name + ": " + a.measured + (a.fix ? "\n   do: " + a.fix : "")).join("\n"));
+  $("healthAdvice").classList.toggle("hidden", adv.length === 0);
+  $("healthAdviceTitle").classList.toggle("hidden", adv.length === 0);
+}
+
+// The two switches: the server says whether each can be pressed now and, when it cannot, why
+// (dendra_app.py::switches_view). An older server sends none: both stay greyed, "not read".
+let switchView = null;
+function renderSwitches(sw) {
+  const j = sw && sw.judge ? sw.judge : null, g = sw && sw.gpu ? sw.gpu : null;
+  setText("judgeState", !j ? "not read" : (j.on === true ? "on" : (j.on === false ? "off" : "not read")));
+  setText("gpuState", !g ? "not read" : (g.on === true ? "on: the card serves the work"
+    : (g.on === false ? "off: the work is served on the CPU with the judge model" : "not read")));
+  $("judgeBtn").textContent = j && j.on === true ? "Turn the judge off" : "Turn the judge on";
+  $("gpuBtn").textContent = g && g.on === true ? "Turn GPU mining off" : "Turn GPU mining on";
+  $("judgeBtn").disabled = !(j && j.enabled === true);
+  $("gpuBtn").disabled = !(g && g.enabled === true);
+  setText("judgeWhy", j && j.why ? "Judge: " + j.why + "." : "");
+  setText("gpuWhy", g && g.why ? "GPU mining: " + g.why + "." : "");
+}
+// The position asked for is the opposite of the one shown, sent as such (on: true or false), never a toggle.
+async function flip(which, working) {
+  const cur = switchView ? switchView[which] : null;
+  if (!cur || cur.enabled !== true) return;
+  setText("switchMsg", working);
+  $("judgeBtn").disabled = true; $("gpuBtn").disabled = true;
+  const { status, data } = await api("/api/" + which, withSlot({ on: cur.on !== true }));
+  setText("switchMsg", status === 200 ? "done" + (data.note ? ": " + data.note : "")
+    : ("not done: " + (data.error || "") + " " + (data.text || "")).slice(0, 600));
+  refresh();
+}
+$("judgeBtn").onclick = () => flip("judge", "working… (the first seat downloads the judge model: this can take a long while)");
+$("gpuBtn").onclick = () => flip("gpu", "working… (turning the card off seats the judge first when it is off, then restarts the miner on the CPU)");
+
+// The state in plain words, as the server decided it (dendra_app.py::STATUS_RULES): the page applies no rule of its own.
+// A link is drawn only for the project's own site.
+const SITE_PREFIX = "https://dendranetwork.com/";
+const LEVEL_PILL = { green: "ok", orange: "warn", red: "bad" };
+function renderStatus(s) {
+  const ok = statusRead(s);
+  const pill = headerPill(s);
+  setText("state", pill.text); $("state").className = "pill " + pill.cls;
+  setText("statusWord", ok ? s.word : "not read");
+  $("statusWord").className = "pill stateword " + (ok ? LEVEL_PILL[s.level] : "warn");
+  setText("statusHeadline", ok ? s.headline : "The state could not be read: this application is older than the server it talks to.");
+  const list = $("statusRules"); list.innerHTML = "";
+  (ok ? s.rules : []).forEach((r, i) => {
+    const li = document.createElement("li"); li.className = r.level;
+    // The first rule is the headline above: its sentence is not said twice.
+    if (i > 0) { const says = document.createElement("div"); says.textContent = r.says; li.appendChild(says); }
+    const todo = document.createElement("div"); todo.className = "do";
+    todo.textContent = "What to do: " + r.do + (r.in_app ? " (in this application: " + r.in_app + ")" : ""); li.appendChild(todo);
+    if (r.page && typeof r.page.url === "string" && r.page.url.startsWith(SITE_PREFIX)) {
+      const a = document.createElement("a"); a.href = r.page.url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = "The page that explains it: " + r.page.label; li.appendChild(a);
+    }
+    const why = document.createElement("div"); why.className = "note";
+    why.textContent = "Rule " + r.id + " (" + r.rule + "), decided by " + r.source; li.appendChild(why);
+    list.appendChild(li);
+  });
+  setText("statusChecked", ok && s.level === "green" ? "Read and fine: " + s.checked.join("; ") + "." : "");
+}
+
+// "Test my machine": the figures are the server's (dendra_app.py::machine_view). A part that was not measured shows
+// its reason and no number.
+const num = (x, d) => Number(x).toLocaleString(undefined, { maximumFractionDigits: d });
+const PLACE = { card: "on the card", cpu: "on the CPU, in system memory", split: "split between the card and the CPU" };
+function partText(p, measured) {
+  if (!p || (p.state !== "measured" && p.state !== "not measured")) return "not read";
+  return p.state === "measured" ? measured(p) : "not measured: " + p.why;
+}
+// The test on screen: the server's saved one, unless a test run from this page is newer (one that measured nothing is
+// not saved, and the next refresh must not wipe it from the screen).
+let shownTest = null;
+function renderTest(t) {
+  if (!t) { setText("testSpeed", "not tested yet"); setText("testVerdict", "not tested yet"); setText("testWhen", "—"); return; }
+  setText("testSpeed", partText(t.throughput, p => num(p.words_per_s, 1) + " words per second (" + p.words + " words in " + num(p.seconds, 1) + " s)" +
+    (p.placement ? ", the model runs " + PLACE[p.placement] : ", where the model runs was not read") + (p.model ? ", model " + p.model : "")));
+  setText("testVerdict", partText(t.verdict, p => num(p.seconds, 1) + " s for one verdict on a one-sentence sample (" + p.generations +
+    " reference answers" + (p.model ? ", judge model " + p.model : "") + (p.load_seconds ? "; loading the model took " + num(p.load_seconds, 1) + " s first" : "") + ")"));
+  setText("testWhen", Number.isInteger(t.at) ? ago(Math.max(0, Math.floor(Date.now() / 1000) - t.at)) : "not read");
+}
+$("testBtn").onclick = async () => {
+  setText("testMsg", "testing… (this can take minutes: it loads the models first, and the miner answers more slowly meanwhile)");
+  $("testBtn").disabled = true;
+  const { status, data } = await api("/api/machine-test", withSlot({}));
+  $("testBtn").disabled = false;
+  if (status === 200) { setText("testMsg", "done"); shownTest = data; renderTest(shownTest); }
+  else setText("testMsg", ("not done: " + (data.error || "")).slice(0, 400));
+};
+
+// How the keys are kept, as the miner container read it. null is "not read", never "in clear".
+function keysText(k) {
+  if (!k || unread(k.at_rest)) return k && k.error ? "not opened: " + k.error : "not read";
+  if (k.at_rest === "encrypted") return "encrypted (file keyring); its passphrase is the file in DENDRA_SECRETS_DIR — back up both";
+  if (k.backend === "test") return "unencrypted (test keyring) — to encrypt: bash deploy/testnet-miner/encrypt-keys.sh";
+  return "keyring encrypted; still unencrypted: " + (k.clear_files || []).join(", ") + " (restart the miner to seal them)";
+}
+
+// The banner stays while the season pays the key that sits on this machine.
+function payoutBanner(p) {
+  if (!p || p.to_machine_key !== true) return "";
+  const where = p.machine_address ? " (" + p.machine_address + ")" : "";
+  if (p.owner) {
+    // Owner mode: the programme accepts the declaration from the owner's key only, which is not on this machine.
+    return "The Final Testnet Season pays this machine's own key" + where + ", the miner's operator. Anyone who copies this machine's keys can spend what it earns. " +
+      "This miner is owned by " + p.owner + ": the declaration is signed with the owner's key -- final_season_miner.py payout-prepare here, the signature on the owner's machine, then payout-submit (see deploy/testnet-miner/README.md, owner mode).";
+  }
+  const pending = p.setting ? " DENDRA_PAYOUT_ADDRESS=" + p.setting + " is set: the miner declares it once it is registered, and it is not accepted yet." : "";
+  return "The Final Testnet Season pays this machine's own key" + where + ". Anyone who copies this machine's keys can spend what it earns. " +
+    "Declare an address whose key is not on this machine: in 'Where rewards go' below, or with bash deploy/join.sh --payout-address dendra1…" + pending;
+}
+
+// --- The dashboard: one card per subject, as the server decided it (dendra_app.py::dashboard_view). ---
+const DASH_LEVEL = { green: "ok", amber: "warn", red: "bad" };
+const DASH_WORD = { green: "Fine", amber: "Needs you", red: "Blocked" };
+function renderDashboard(d) {
+  const ok = !!(d && Array.isArray(d.cards) && DASH_LEVEL[d.level]);
+  setText("dashLevel", ok ? DASH_WORD[d.level] : "not read");
+  $("dashLevel").className = "pill stateword " + (ok ? DASH_LEVEL[d.level] : "warn");
+  const grid = $("dashGrid"); grid.innerHTML = "";
+  setText("dashWho", multi ? "The identity on screen: slot " + slot + "." : "");
+  (ok ? d.cards : []).forEach(c => {
+    const card = document.createElement("div"); card.className = "dashcard " + c.level;
+    const head = document.createElement("h3"); head.textContent = c.name; card.appendChild(head);
+    const lv = document.createElement("span"); lv.className = "lv " + c.level; lv.textContent = DASH_WORD[c.level] || c.level;
+    card.appendChild(lv);
+    const says = document.createElement("p"); says.textContent = c.says; card.appendChild(says);
+    grid.appendChild(card);
+  });
+  if (!ok) { const p = document.createElement("p"); p.className = "note"; p.textContent = "The dashboard could not be read: this application is older than the server it talks to."; grid.appendChild(p); }
+}
+
+// --- The diagnosis: the server's list of problems (dendra_app.py::diagnosis_view). ---
+function renderDiagnosis(d) {
+  const ok = !!(d && Array.isArray(d.problems));
+  const worst = ok ? (d.problems.some(p => p.level === "red") ? "red" : (d.problems.length ? "amber" : "green")) : null;
+  setText("diagWord", !ok ? "not read" : (worst === "red" ? d.problems.length + " problem(s) to act on" :
+    (worst === "amber" ? d.problems.length + " to look at" : "nothing found")));
+  $("diagWord").className = "pill stateword " + (worst === "red" ? "bad" : (worst === "amber" ? "warn" : (worst === "green" ? "ok" : "warn")));
+  const list = $("diagList"); list.innerHTML = "";
+  (ok ? d.problems : []).forEach(p => {
+    const li = document.createElement("li"); li.className = p.level === "red" ? "red" : "orange";
+    const what = document.createElement("div"); what.textContent = p.what; li.appendChild(what);
+    const todo = document.createElement("div"); todo.className = "do"; todo.textContent = "What to do: " + p.fix; li.appendChild(todo);
+    const why = document.createElement("div"); why.className = "note";
+    why.textContent = "Why it matters: " + p.matters + " (decided by " + p.source + ")"; li.appendChild(why);
+    list.appendChild(li);
+  });
+  setText("diagChecked", ok && !d.problems.length ? "Read and fine: " + (d.checked || []).join("; ") + "." : "");
+}
+
+// --- The pay, by season day: the server's list (dendra_app.py::pay_days_view), the chart drawn here. ---
+function renderPay(p) {
+  const days = p && Array.isArray(p.days) ? p.days : null;
+  setText("payTotal", p && p.enabled ? (unread(p.season_paid_udndr) ? "?" : dndr(p.season_paid_udndr)) : "—");
+  setText("payPoints", p && p.enabled ? (unread(p.season_paid_udndr) || unread(p.ranked_days) ? "" :
+    amount(p.season_paid_udndr) + " point(s) over " + p.ranked_days + " ranked day(s)") : "");
+  const chart = $("payChart"); chart.innerHTML = "";
+  const body = $("payBody"); body.innerHTML = "";
+  if (!p || !p.enabled) { setText("payMsg", "The rankings are not read here: no Final Testnet Season address in this miner's settings (DENDRA_FINAL_SEASON_URL)."); return; }
+  if (!days) { setText("payMsg", "The ranked days were not read: a ranking that failed leaves the list out, never a zero."); return; }
+  setText("payMsg", days.length ? "" : "No day is ranked yet: a day is ranked only once it is final.");
+  const top = Math.max(1, ...days.map(d => (d.paid_udndr || 0)));
+  days.forEach(d => {
+    const col = document.createElement("div"); col.className = "col"; col.title = "Season day " + (d.day + 1) + ": " + amount(d.paid_udndr) + " DNDR paid";
+    const bar = document.createElement("div"); bar.className = "bar" + (d.paid_udndr ? "" : " zero");
+    bar.style.height = Math.round((d.paid_udndr || 0) * 100 / top) + "%";
+    col.appendChild(bar);
+    const day = document.createElement("div"); day.className = "day"; day.textContent = d.day + 1; col.appendChild(day);
+    chart.appendChild(col);
+    const tr = document.createElement("tr");
+    const cells = [String(d.day + 1), String(d.verified_requests), String(d.verdicts), String(d.presence),
+      amount(d.gross_udndr), amount(d.paid_udndr), d.reason_plain || (d.listed ? "" : "not listed")];
+    cells.forEach((t, i) => { const td = document.createElement("td"); if (i > 0 && i < 6) td.className = "num"; td.textContent = t; tr.appendChild(td); });
+    body.appendChild(tr);
+  });
+}
+
+// --- One row per card and identity: the server's list (dendra_app.py::cards_route). ---
+const WHERE = { card: "on the card", cpu: "on the CPU (the judge model)" };
+function memoryText(m) {
+  if (!m || m.state !== "read") return "not read";
+  const parts = [];
+  if (m.mode) parts.push(m.mode);
+  if (typeof m.footprint_mb === "number") parts.push("model " + m.footprint_mb + " MiB");
+  if (typeof m.mem_available_mb === "number" && typeof m.mem_total_mb === "number")
+    parts.push(m.mem_available_mb + " of " + m.mem_total_mb + " MiB free");
+  return parts.length ? parts.join(", ") : "read, with no figure";
+}
+function judgeWord(w) {
+  if (w === "active") return "active";
+  if (w === "mute") return "mute (drawn, gives no verdict)";
+  if (w === "off") return "off (no new seats)";
+  return "not read";
+}
+function renderCards(d) {
+  const body = $("cardsBody"); body.innerHTML = "";
+  const rows = d && Array.isArray(d.rows) ? d.rows : null;
+  // A day that was not read is never shown as a day without facts: "not listed" needs a ranked day that was read.
+  const dayRead = !!(d && typeof d.day === "number");
+  setText("cardsMsg", rows ? (dayRead ? "" : "The pay of the latest ranked day was not read" + (d.ranking_why ? ": " + d.ranking_why : "") + ".")
+    : ((d && d.error) ? "The identities of this machine could not be listed: " + d.error : "The cards were not read."));
+  if (!rows) return;
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    const w = r.work;
+    const cells = [
+      "slot " + r.slot + (r.miner_id ? " — " + r.miner_id : "") + (r.state === "active" ? "" : " (" + r.state + ")"),
+      r.uuid || "no card named",
+      (r.served && r.served.model ? r.served.model : "model not read") + (r.served && r.served.where ? ", " + (WHERE[r.served.where] || r.served.where) : (r.served && r.served.why ? " (" + r.served.why + ")" : "")),
+      memoryText(r.memory),
+      w && typeof w.verified_requests === "number" ? String(w.verified_requests) : "—",
+      w && typeof w.verdicts === "number" ? String(w.verdicts) : "—",
+      w && typeof w.presence === "number" ? String(w.presence) : "—",
+      w && typeof w.paid_udndr === "number" ? amount(w.paid_udndr) + (w.reason_plain ? " (" + w.reason_plain + ")" : "") : (dayRead ? "not listed" : "not read"),
+      judgeWord(r.judge)];
+    cells.forEach((t, i) => { const td = document.createElement("td"); if (i >= 4 && i <= 7) td.className = "num"; td.textContent = t; tr.appendChild(td); });
+    body.appendChild(tr);
+  });
+}
+let noMinerInstalled = false;
+async function loadCards() {
+  if (noMinerInstalled) return;
+  const { status, data } = await api("/api/cards");
+  if (noMinerInstalled) return;
+  renderCards(status === 200 ? data : null);
+}
+$("cardsBtn").onclick = async () => { setText("cardsMsg", "reading…"); await loadCards(); };
+
+// --- Alerts and the explained log (dendra_app.py::alerts_route, logs_explained_route). ---
+let alertView = null;
+function renderAlerts(a) {
+  const on = !!(a && typeof a.enabled === "boolean");
+  setText("alertState", !on ? "not read" : (a.enabled ? "on: a notification is shown when the pay of the identity on screen is blocked" : "off: the problems are listed here, nothing is shown on the desktop"));
+  $("alertBtn").textContent = on && a.enabled ? "Turn alerts off" : "Turn alerts on";
+  setText("alertNotifier", a && a.notifier ? "the machine's notifier answers" : "no notifier on this machine: install the libnotify sender (notify-send)");
+  setText("alertLast", a && a.last_notified_at ? ago(Math.max(0, Math.floor(Date.now() / 1000) - a.last_notified_at)) + ": " + a.last_notified_says : "nothing was shown yet");
+  const list = $("alertList"); list.innerHTML = "";
+  (a && Array.isArray(a.blockers) ? a.blockers : []).forEach(b => {
+    const li = document.createElement("li"); li.className = "red";
+    const says = document.createElement("div"); says.textContent = b.says; li.appendChild(says);
+    list.appendChild(li);
+  });
+  if (a && a.last_failure) { const li = document.createElement("li"); li.className = "orange";
+    const says = document.createElement("div"); says.textContent = "The last notification could not be shown: " + a.last_failure; li.appendChild(says); list.appendChild(li); }
+}
+$("alertBtn").onclick = async () => {
+  const target = !(alertView && alertView.enabled === true);
+  setText("alertMsg", "saving…");
+  const { status, data } = await api("/api/alerts", { enabled: target });
+  setText("alertMsg", status === 200 ? (target ? "alerts are on" : "alerts are off") : ("not saved: " + (data.error || "")).slice(0, 300));
+  loadAlerts();
+};
+// The alerts view arrives with the overview (refresh) and from /api/alerts; a GET that fails (an older
+// server) leaves what the overview brought on screen.
+function adoptAlerts(a) {
+  if (a && typeof a.enabled === "boolean") { alertView = a; renderAlerts(a); }
+}
+async function loadAlerts() {
+  if (noMinerInstalled) return;
+  const { status, data } = await api(q("/api/alerts"));
+  if (noMinerInstalled) return;
+  if (status === 200) adoptAlerts(data);
+  else if (!alertView) renderAlerts(null);
+}
+function renderLog(d) {
+  const list = $("logList"); list.innerHTML = "";
+  const lines = d && Array.isArray(d.lines) ? d.lines : [];
+  lines.forEach(l => {
+    const row = document.createElement("div"); row.className = "logline " + (l.severity || "info");
+    const dot = document.createElement("span"); dot.className = "dot"; row.appendChild(dot);
+    if (l.service) { const svc = document.createElement("span"); svc.className = "svc"; svc.textContent = l.service; row.appendChild(svc); }
+    const says = document.createElement("span"); says.textContent = l.says || "No explanation for this line in the application's table; the raw line is below."; row.appendChild(says);
+    const btn = document.createElement("button"); btn.textContent = "raw";
+    const raw = document.createElement("pre"); raw.className = "hidden"; raw.textContent = l.raw;
+    btn.onclick = () => { raw.classList.toggle("hidden"); };
+    row.appendChild(btn); row.appendChild(raw);
+    list.appendChild(row);
+  });
+  $("logRaw").textContent = d && typeof d.text === "string" ? d.text : "";
+  setText("alertMsg", d && d.error ? "The log was not read: " + String(d.error).replace(/[.]$/, "") + "." : (lines.length ? "" : "The log gave no line" + (d && typeof d.rc === "number" && d.rc !== 0 ? " (docker answered with exit " + d.rc + ")" : "") + "."));
+}
+$("logBtn").onclick = async () => {
+  setText("alertMsg", "reading the log…");
+  const { status, data } = await api(q("/api/logs/explained"));
+  if (status === 200) { $("logList").classList.remove("hidden"); renderLog(data); }
+  else setText("alertMsg", ("the log could not be read: " + (data.error || "")).slice(0, 300));
+};
+$("logRawBtn").onclick = () => { $("logRaw").classList.toggle("hidden"); };
+
+async function refresh() {
+  const { status, data } = await api(q("/api/overview"));
+  if (ended) return;
+  if (status !== 200) {
+    setText("state", status === 400 && data.error ? data.error : (status === 0 ? "Dendra does not answer" : "no access"));
+    $("state").className = "pill bad";
+    // An identity that is no longer on this machine: the next refresh shows the list again, from slot 0.
+    if (status === 400 && multi) slot = 0;
+    return;
+  }
+  if (!data.installed) {
+    noMinerInstalled = true;
+    $("setup").classList.remove("hidden");
+    setText("setupHint", data.hint);
+    setText("state", "not installed"); $("state").className = "pill warn";
+    document.querySelectorAll(".dash").forEach(e => e.classList.add("hidden"));
+    ["dashSection", "cardsSection", "diagSection", "paySection", "alertSection", "statusCard"]
+      .forEach(id => $(id).classList.remove("hidden"));
+    const missing = "No miner is installed on this machine yet.";
+    ["dashLevel", "cardsMsg", "diagWord", "payMsg", "alertMsg", "statusHeadline"].forEach(id => setText(id, missing));
+    ["dashStopped", "cardsStopped", "diagStopped", "payStopped", "alertsStopped", "detailsStopped"].forEach(id => setText(id, ""));
+    ["dashGrid", "cardsBody", "diagList", "payChart", "payBody", "alertList", "statusRules"].forEach(id => { $(id).innerHTML = ""; });
+    ["dashWho", "diagChecked", "payPoints", "alertState", "alertLast", "alertNotifier", "statusChecked"].forEach(id => setText(id, ""));
+    setText("payTotal", "—");
+    ["cardsBtn", "alertBtn", "logBtn", "logRawBtn"].forEach(id => { $(id).disabled = true; });
+    return;
+  }
+  noMinerInstalled = false;
+  const stoppedRule = data.status && Array.isArray(data.status.rules) ? data.status.rules.find(r => r.id === "stopped") : null;
+  ["dashStopped", "cardsStopped", "diagStopped", "payStopped", "alertsStopped", "detailsStopped"]
+    .forEach(id => setText(id, stoppedRule ? stoppedRule.says : ""));
+  $("setup").classList.add("hidden");
+  document.querySelectorAll(".dash").forEach(e => e.classList.remove("hidden"));
+  ["cardsBtn", "alertBtn", "logBtn", "logRawBtn"].forEach(id => { $(id).disabled = false; });
+  // The identity this overview is about is the server's answer (`slot`), never assumed here.
+  multi = data.multi === true;
+  slot = Number.isInteger(data.slot) ? data.slot : 0;
+  renderSlots(data);
+  $("payoutAllBtn").classList.toggle("hidden", !multi);
+  $("payoutAllCodeBtn").classList.toggle("hidden", !multi);
+  if (data.docker_error) {
+    // Docker did not answer: say why, never "no miner container", which is a reading it could not make. The pill
+    // is the state's (renderStatus), whose docker rule says it too.
+    setText("ctr", data.docker_error);
+  } else {
+    setText("ctr", (data.containers || []).map(c => c.service + ": " + c.state).join(", ") || "none");
+  }
+  setText("mid", data.identity.miner_id || (data.identity.keyring_error ? "keys not opened: " + data.identity.keyring_error : "not read"));
+  setText("addr", data.identity.address || "not read");
+  // An older server sends no `role`: its setting is then all there is, shown as a request, never as a vote.
+  setText("role", roleText(data.role || { word: null, why: "", requested: data.judge === true }));
+  setText("judgeMemory", judgeMemoryText(data.judge_memory));
+  setText("judgeSeat", judgeSeatText(data.judge_memory));
+  setText("keysAtRest", keysText(data.keys));
+  switchView = data.switches || null;
+  renderSwitches(switchView);
+  const up = data.update || {};
+  setText("kitUpdate", up.instruction ? up.instruction : "not recorded by the deploy/join.sh that set up this kit: re-run deploy/join.sh with the options you used (it records it, or its warning says why it could not)");
+  // The daemon's reading of the kit against the network's: true raises the banner, false raises nothing, and
+  // null (or an older server that sends no `kit`) is "version check not read", never "up to date".
+  const kit = data.kit || { behind: null, latest: null, why: "version check not read" };
+  const kitUpdate = up.instruction ? up.instruction : "the update instruction recorded by deploy/join.sh (see the Update line above)";
+  setText("kitBannerText", kit.behind === true
+    ? "Kit " + (kit.latest || "?") + " is published and this machine runs an older one. Update: " + kitUpdate
+    : "");
+  $("kitBanner").classList.toggle("hidden", kit.behind !== true);
+  setText("kitCheck", kit.behind === true ? "behind the published kit" + (kit.latest ? " (" + kit.latest + ")" : "")
+    : (kit.behind === false ? "matches the published kit" : (kit.why || "version check not read")));
+  const pb = payoutBanner(data.payout);
+  setText("payoutBannerText", pb);
+  $("payoutBanner").classList.toggle("hidden", !pb);
+  const pv = data.payout || {};
+  setText("payoutDeclared", pv.declared ? "Declared and accepted by the programme: " + pv.declared : (unread(pv.to_machine_key) ? "" : "No address declared yet."));
+  const ch = data.chain || {};
+  setText("balance", dndr(ch.balance_udndr));
+  setText("registered", ch.registered === null || ch.registered === undefined ? "not read" : (ch.registered ? "yes" : "no"));
+  setText("stake", dndr(ch.stake_udndr));
+  setText("subsidy", dndr(ch.subsidy_claimable_udndr));
+  // Leaving: read-only. The command is shown, never run from this screen.
+  setText("exitState", unread(ch.registered) ? "not read" : (ch.registered ? "yes" : "no: there is nothing to leave"));
+  setText("exitStake", ch.registered === false ? "—" : dndr(ch.stake_udndr));
+  setText("exitCmd", data.exit_command || "not read");
+  const xn = data.exit_notes || {};
+  setText("exitHow", xn.how || "This screen does not leave the network for you.");
+  setText("exitAfter", xn.after || "");
+  lastHealth = data.health || null;
+  renderHealth(lastHealth);
+  renderStatus(data.status);
+  // The first screen's cards, the diagnosis and the alert's blockers: the server decides, this page draws.
+  renderDashboard(data.dashboard);
+  renderDiagnosis(data.diagnosis);
+  adoptAlerts(data.alerts);
+  if (data.machine_test && (!shownTest || data.machine_test.at >= shownTest.at)) shownTest = data.machine_test;
+  renderTest(shownTest);
+  const p = data.programme || {};
+  const r = data.rules || {};
+  const latest = ["lastPaid", "lastDay", "presence", "requests", "verdicts"];
+  setText("lastParts", "");
+  // "?" is a value this screen could not read; it is never shown as 0 paid or 0 requests.
+  if (!p.enabled) {
+    ["day", "ranked", "paid"].concat(latest).forEach(i => setText(i, "—"));
+    // The Final Testnet Season counts what the chain records: the setting only lets this screen read the
+    // rankings.
+    setText("day", "not read: no programme address in this miner's settings (DENDRA_FINAL_SEASON_URL)");
+    setText("lastParts", "The Final Testnet Season counts what the chain records whether or not this setting is there; reading the rankings here, and naming where rewards go, need it.");
+    renderEarnings(null, r);
+    renderPay(p);
+  } else {
+    const st = p.status || {};
+    const day = st.day;
+    // The season ends at a fixed instant (`rules.end_time`, exclusive), read against the chain's block
+    // times; `ended` says whether the chain is past it. How many days it has is a reading of the chain,
+    // so the screen never shows "N of M". A missing or malformed field shows '?', never a guess.
+    const ended = st.ended;
+    const endAt = (st.rules && typeof st.rules.end_time === "string") ? Date.parse(st.rules.end_time) : NaN;
+    const endText = isNaN(endAt) ? null : (() => {
+      const e = new Date(endAt - 60000), m = ["January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December"], z = (x) => String(x).padStart(2, "0");
+      return e.getUTCDate() + " " + m[e.getUTCMonth()] + " " + e.getUTCFullYear() + ", " +
+        z(e.getUTCHours()) + ":" + z(e.getUTCMinutes()) + " UTC";
+    })();
+    setText("day", !p.status ? "?" : (day === null ? "the programme service has no block height yet" :
+      (unread(day) || (ended !== true && ended !== false) ? "?" : (day < 0 ? "not started" :
+        (ended ? "the season is over" + (Number.isInteger(st.last_day) ? " (its last day was day " + (st.last_day + 1) + ")" : "") :
+          "day " + (day + 1) + (endText ? ", the season ends " + endText : ", end not readable"))))));
+    setText("ranked", unread(p.ranked_days) ? "?" : (p.ranked_days === 0 ? "none yet" : String(p.ranked_days)));
+    setText("paid", unread(p.season_paid_udndr) ? "?" : dndr(p.season_paid_udndr) + " over " + p.ranked_days + " ranked day(s)");
+    const L = p.latest;
+    if (unread(p.ranked_days)) latest.forEach(i => setText(i, "?"));
+    else if (!L) { latest.forEach(i => setText(i, "—")); setText("lastDay", "no day ranked yet"); }
+    else {
+      setText("lastPaid", dndr(L.paid_udndr));
+      setText("lastDay", (L.day + 1) + " (ranking/day-" + String(L.day).padStart(3, "0") + ".json)");
+      setText("presence", L.presence + (L.presence > r.presence_max_windows ? " (at most " + r.presence_max_windows + " are paid)" : ""));
+      setText("requests", String(L.verified_requests));
+      setText("verdicts", String(L.verdicts));
+      setText("lastParts", lastParts(L));
+    }
+    // The earnings are read with the rankings: a ranking not read leaves them "?", never 0.
+    renderEarnings(unread(p.ranked_days) ? null : p.earnings, r);
+    if (unread(p.ranked_days)) EARN_LINES.forEach(([id]) => setText(id, "?"));
+    renderPay(p);
+  }
+  setText("formulaNote", formulaNote(data.rules));
+  if (data.payout_address && !$("payout").value) $("payout").value = data.payout_address;
+  if (data.recovery_confirmed === false) showRecoveryGate();
+}
+
+// The recovery card opens on its code's gate: a refresh never fetches the words, which need a confirmation code
+// that Dendra prints in the terminal or window that started it (dendra_app.py::App.issue_code), never here.
+let recoveryShown = false;
+const whoseWords = (k) => multi ? "These are the words of slot " + k + " only. Each identity of this machine has its own 24 words." : "";
+function showRecoveryGate(msg) {
+  $("recovery").classList.remove("hidden");
+  if (recoveryShown) return;
+  // N identities are N phrases: the card says whose words these are.
+  setText("recoveryWho", whoseWords(slot));
+  $("recoveryGate").classList.remove("hidden"); $("recoveryWords").classList.add("hidden");
+  if (msg !== undefined) setText("recoveryMsg", msg);
+}
+function hideRecovery() {
+  $("recovery").classList.add("hidden"); recoveryShown = false;
+  $("words").innerHTML = ""; $("ask").innerHTML = ""; $("recoveryCode").value = "";
+}
+// A code is given for one change, which the line beside it names: the payout's address and identity (or every
+// identity), or the identity whose words are shown. The server refuses it for any other.
+async function askCode(purpose, msgId, every) {
+  const body = purpose === "payout" ? { for: purpose, address: $("payout").value.trim() } : { for: purpose };
+  const { status, data } = await api("/api/code", every ? Object.assign(body, { slot: "all" }) : withSlot(body));
+  setText(msgId, status === 200 && data.sent === true
+    ? "A code was printed in " + data.where + ". It works once, for " + Math.round(data.seconds / 60) + " minutes."
+    : ("no code: " + (data.error || "the server did not answer")).slice(0, 300));
+}
+$("recoveryCodeBtn").onclick = () => askCode("recovery", "recoveryMsg");
+$("showWordsBtn").onclick = async () => {
+  const code = $("recoveryCode").value.trim();
+  $("recoveryCode").value = "";
+  const { status, data } = await api(q("/api/recovery"), undefined, { "X-Dendra-Code": code });
+  if (status !== 200) { setText("recoveryMsg", (data.error || "the words could not be read").slice(0, 300)); return; }
+  if (!data.present) { hideRecovery(); setText("recoveryMsg", ""); return; }
+  recoveryShown = true;
+  $("recoveryGate").classList.add("hidden"); $("recoveryWords").classList.remove("hidden");
+  setText("recoveryWho", whoseWords(data.slot));
+  setText("recoveryMsg", "");
+  const w = $("words"); w.innerHTML = "";
+  data.words.forEach((word, i) => { const d = document.createElement("div"); d.className = "word"; d.innerHTML = "<b>" + (i + 1) + "</b>"; d.appendChild(document.createTextNode(word)); w.appendChild(d); });
+  const a = $("ask"); a.innerHTML = "";
+  data.ask.forEach(n => { const inp = document.createElement("input"); inp.placeholder = "word " + n; inp.dataset.pos = n; inp.style.maxWidth = "160px"; inp.autocomplete = "off"; inp.spellcheck = false; a.appendChild(inp); });
+};
+
+$("confirmBtn").onclick = async () => {
+  const words = {};
+  document.querySelectorAll("#ask input").forEach(i => words[i.dataset.pos] = i.value);
+  const { status, data } = await api("/api/recovery/confirm", withSlot({ words }));
+  // recoveryShown goes back to false: a later key's phrase must be shown in this session too.
+  if (status === 200) { hideRecovery(); setText("recoveryMsg", ""); }
+  else if (status === 409) {
+    // The phrase on screen is no longer the miner's (its key changed): its words go, and the new key's words take
+    // a new code.
+    recoveryShown = false; $("words").innerHTML = ""; $("ask").innerHTML = "";
+    showRecoveryGate("The miner's key changed since these words were shown: get a new code to see the words of its new key.");
+  }
+  else setText("recoveryMsg", data.error || "not confirmed");
+};
+
+async function act(path, msgId) {
+  setText(msgId, "working…");
+  const { data } = await api(path, withSlot({}));
+  // Stop interrupts the action in progress first (dendra_app.py::App.take_stop): the page says which one.
+  const first = data.interrupted ? "Interrupted " + data.interrupted +
+    (data.interrupted_where === "another copy" ? " (in another copy of Dendra on this machine)" : "") + ", then " : "";
+  const beside = data.beside ? " Note: " + data.beside + "." : "";
+  setText(msgId, (data.rc === 0 ? (first ? first + "stopped the miner." : "done") :
+    first + ("failed: " + (data.text || data.error || ""))).slice(0, 400) + beside);
+  refresh();
+}
+$("startBtn").onclick = () => act("/api/start", "minerMsg");
+$("stopBtn").onclick = () => act("/api/stop", "minerMsg");
+$("restartBtn").onclick = () => act("/api/restart", "minerMsg");
+// Another identity selected: what was shown for the previous one goes (its phrase above all).
+$("slotSel").onchange = () => {
+  const v = Number($("slotSel").value);
+  if (!Number.isInteger(v) || v === slot) return;
+  slot = v; manualHealth = null; shownTest = null;
+  hideRecovery(); setText("recoveryMsg", ""); $("logsCard").classList.add("hidden");
+  return refresh();
+};
+$("healthBtn").onclick = async () => {
+  setText("healthMsg", "checking… (a quick check takes up to a few minutes)");
+  $("healthBtn").disabled = true;
+  const { status, data } = await api("/api/health/run", withSlot({}));
+  $("healthBtn").disabled = false;
+  if (status === 200 && data.health) {
+    manualHealth = Object.assign({}, data.health, { manual: true, received_ms: Date.now() });
+    setText("healthMsg", "done");
+    renderHealth(lastHealth);
+    // The state and its pill are the server's: it reads this quick check as the newest report.
+    await refresh();
+  } else setText("healthMsg", (data.error || "the check could not run").slice(0, 400));
+};
+$("logsBtn").onclick = async () => { const { data } = await api(q("/api/logs")); $("logsCard").classList.remove("hidden"); setText("logs", data.text || ""); };
+// Changing where rewards go takes a confirmation code, read from the terminal or window that started Dendra; the
+// field is emptied after each try: a refused try costs the code one of its tries (dendra_app.py::CODE_TRIES), and
+// the code goes at the last one.
+$("payoutCodeBtn").onclick = () => askCode("payout", "payoutMsg");
+$("payoutAllCodeBtn").onclick = () => askCode("payout", "payoutMsg", true);
+function payoutCode() { const c = $("payoutCode").value.trim(); $("payoutCode").value = ""; return c; }
+$("payoutBtn").onclick = async () => {
+  setText("payoutMsg", "signing…");
+  const { status, data } = await api("/api/payout", withSlot({ address: $("payout").value.trim(), code: payoutCode() }));
+  setText("payoutMsg", status === 200 ? "saved: rewards go to this address from now on" + (multi ? " (slot " + slot + ")" : "") : (data.error || data.text || "refused").slice(0, 400));
+};
+// The same address for every identity: each one signs its own declaration, in its own container.
+$("payoutAllBtn").onclick = async () => {
+  setText("payoutMsg", "signing, one identity after the other…");
+  const { status, data } = await api("/api/payout", { address: $("payout").value.trim(), code: payoutCode(), slot: "all" });
+  const per = (data.results || []).map(r => "slot " + r.slot + ": " + (r.rc === 0 ? "saved" : "refused (" + (r.error || r.text || "").slice(0, 160) + ")")).join("; ");
+  setText("payoutMsg", status === 200 ? "saved for every identity: " + per : (per || data.error || "refused").slice(0, 600));
+};
+// Is the node reachable from outside: the server's reading of deploy/node_reachability.sh (dendra_app.py::reachability_view),
+// in its words. The page draws it and decides nothing; a reading that is not there is "not read", never "reachable".
+const REACH_PILL = { open: "ok", closed: "", unknown: "warn", none: "" };
+function reachRead(v) {
+  return !!(v && typeof v.state === "string" && Object.prototype.hasOwnProperty.call(REACH_PILL, v.state) &&
+    typeof v.says === "string" && typeof v.word === "string");
+}
+function fillSteps(listId, titleId, items) {
+  const list = $(listId); list.innerHTML = "";
+  const rows = Array.isArray(items) ? items : [];
+  rows.forEach(s => { const li = document.createElement("li"); li.textContent = String(s); list.appendChild(li); });
+  list.classList.toggle("hidden", rows.length === 0);
+  $(titleId).classList.toggle("hidden", rows.length === 0);
+}
+function renderReach(v) {
+  const ok = reachRead(v);
+  setText("reachState", ok ? v.word : "not read");
+  $("reachState").className = "pill " + (ok ? REACH_PILL[v.state] : "warn");
+  setText("reachSays", ok ? v.says : "The reachability could not be read: this application is older than the server it talks to.");
+  setText("reachPeers", ok && typeof v.peers === "string" ? v.peers : "—");
+  setText("reachAdvertised", ok && typeof v.advertised === "string" ? v.advertised : "—");
+  setText("reachAt", ok && typeof v.reachable_at === "string" ? v.reachable_at : "—");
+  fillSteps("reachSteps", "reachStepsTitle", ok ? v.steps : []);
+  fillSteps("reachWsl", "reachWslTitle", ok ? v.wsl_steps : []);
+}
+async function loadReach() {
+  const { status, data } = await api("/api/reachability");
+  renderReach(status === 200 ? data : null);
+}
+$("reachBtn").onclick = async () => {
+  setText("reachMsg", "checking… (up to a minute)");
+  $("reachBtn").disabled = true;
+  const { status, data } = await api("/api/reachability/run", {});
+  $("reachBtn").disabled = false;
+  setText("reachMsg", status === 200 ? "done" : ("not done: " + (data.error || "")).slice(0, 300));
+  if (status === 200) renderReach(data);
+};
+refresh();
+timers.push(setInterval(refresh, 15000));
+loadReach();
+timers.push(setInterval(loadReach, 60000));
+loadCards();
+timers.push(setInterval(loadCards, 60000));
+loadAlerts();
+timers.push(setInterval(loadAlerts, 60000));
+</script>
+</body>
+</html>

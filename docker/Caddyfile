@@ -1,0 +1,195 @@
+# Dendra HTTPS reverse proxy (automatic Let's Encrypt certificates).
+#
+# Prerequisites (operator):
+#   1. DNS: two DNS-only A records on Cloudflare (grey cloud, not proxied: Caddy needs the ACME
+#      HTTP-01/TLS-ALPN challenge to reach the VPS directly):
+#         testnet-api.dendranetwork.com    A  <VPS_IP>   (DNS only)
+#         testnet-proof.dendranetwork.com  A  <VPS_IP>   (DNS only)
+#      No `chat.` site: the host that carries the only validator serves no chat interface.
+#      A site block whose name does not resolve to this host is not harmless: Caddy retries its
+#      certificate forever and fills the log with ACME failures.
+#   2. Firewall: ports 80 and 443 open (80 = ACME challenge + HTTP->HTTPS redirect, 443 = HTTPS).
+#
+# Caddy then obtains + auto-renews certificates and reverse-proxies to the internal services over the
+# docker network. The upstream services stay HTTP inside the network; TLS is terminated here.
+
+{
+	email hello@dendranetwork.com
+}
+
+# Shared security headers. Declared as a snippet and imported at site level (outside the `handle_path`
+# blocks), so they apply to every response, errors and preflights included, without interfering with the
+# per-route CORS `header` blocks.
+# No CSP here on purpose: `api` and `proof` serve JSON, which a CSP does not protect. The static website is
+# served by its own host, with its own header file, and is not part of this repository.
+(security_headers) {
+	header {
+		# HTTPS required for one year. No `preload`: that entry is irreversible on a short horizon.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Never let the browser guess a MIME type.
+		X-Content-Type-Options "nosniff"
+		# Do not leak the originating URL to a third party.
+		Referrer-Policy "no-referrer"
+		# Nothing served here is meant to be embedded, and no page of the site uses an iframe.
+		X-Frame-Options "DENY"
+		# Drop the server version banner (smaller fingerprint).
+		-Server
+	}
+}
+
+# Chat-completions gateway (/v1/chat/completions). Two entry points on the same host:
+#   /demo/*  Public showcase path used by the chat (app. and the site). Caddy injects the Bearer key on the
+#            server side, so the browser never sees it and no key can be scraped from the page.
+#            Unauthenticated on purpose: a browser request from another site is refused (403), and
+#            the rest is bounded by the gateway's free-tier quotas (subsidised from Reserve, testnet
+#            tokens). Delete this block to close the public demo.
+#   /*       Normal integrator endpoint: bring your own key (Authorization: Bearer ...).
+testnet-api.dendranetwork.com {
+	import security_headers
+
+	# CORS. A browser refuses a cross-origin response unless the response itself allows it, so every
+	# route a web page is meant to call carries these headers, including the preflight: a separate
+	# request the browser sends first, which never reaches the upstream.
+	# A route without them fails completely, and only in a browser. curl succeeds, which is why a
+	# missing header survives every command-line check.
+	#
+	# Two regimes, on purpose:
+	#  - /demo/* is unauthenticated (Caddy injects the project's own key) and its cost is charged to
+	#    the project's free-tier quota. It echoes only an allow-listed origin, and it refuses any other
+	#    origin with 403 before the gateway (see the block). As a consequence, a `*.pages.dev` preview
+	#    deploy cannot reach /demo.
+	#  - Everything else is either read-only public data or a bring-your-own-key endpoint. "*" is
+	#    correct there: without cookies there is no ambient authority, so a third-party page can only
+	#    spend a key it already holds. Restricting it would break legitimate browser integrators and
+	#    protect nothing.
+	# No Access-Control-Allow-Credentials anywhere: the browser sends a Bearer header it set itself,
+	# never a cookie. Adding it would forbid "*" and grant ambient authority that does not exist today.
+	#
+	# Every matcher below is declared inside its own handle block, never once at site level. Caddy
+	# refuses a named matcher defined twice ("matcher is defined more than once: @preflight"), and
+	# `/rpc*` and `/rest*` already declare their own. A site-level @preflight makes the whole file
+	# unparseable, so Caddy fails to start and api and proof go down together.
+	# Validate before deploying: caddy validate --adapter caddyfile --config <file>
+	handle_path /demo/* {
+		# The origin echo below only decides whether a browser lets the page read the response. It does
+		# not stop the browser from sending the request: a form post or a text/plain fetch needs no
+		# preflight, and it would open a paid job on the project's key for every visitor of that page.
+		# So a request whose Origin header is present and is not an admitted origin is refused here, before
+		# the gateway, preflight included, and carries no CORS header. "null" (a sandboxed frame, a local
+		# file) is refused too. The test reads the joined value: a request carrying several Origin headers
+		# arrives as "a,b", matches no entry, and is refused, even when one of them is admitted.
+		# Admitted: the two hosts of the site and app., which serves the chat. explorer. is not listed:
+		# it only reads public routes, which answer "*", and never posts here.
+		# A request without Origin (curl, a server-side client) is not a browser
+		# sent by another site: it passes and stays bounded by the gateway's per-device and daily quotas.
+		# The gateway also refuses a body that is not application/json (415), a second bound.
+		@foreign_origin {
+			header Origin *
+			not expression `{http.request.header.Origin} in ['https://dendranetwork.com', 'https://www.dendranetwork.com', 'https://app.dendranetwork.com']`
+		}
+		respond @foreign_origin 403
+		# Same joined-value test: the header directive runs before respond, so a per-value match would
+		# put CORS headers on the 403 above.
+		@site_origin expression `{http.request.header.Origin} in ['https://dendranetwork.com', 'https://www.dendranetwork.com', 'https://app.dendranetwork.com']`
+		@preflight method OPTIONS
+		header @site_origin {
+			>Access-Control-Allow-Origin "{http.request.header.Origin}"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type, Authorization"
+			>Access-Control-Max-Age "86400"
+			# Required when the origin is echoed rather than fixed: without it a shared cache can
+			# hand one origin's response, headers included, to a different origin.
+			+Vary "Origin"
+		}
+		respond @preflight 204
+		reverse_proxy gateway:8651 {
+			header_up Authorization "Bearer {$DENDRA_API_KEY}"
+		}
+	}
+	# Chain RPC and REST for browser apps (web wallet, explorer): HTTPS and CORS, so an https:// page can
+	# query the chain without mixed content. Read-only public data, exactly what :26657 and :1317 already
+	# serve: no key, no secret. `/rpc*` rather than `/rpc/*` because CosmJS POSTs to the bare base.
+	# `>` sets or replaces the header instead of adding one. Tendermint and the REST API may already emit
+	# their own Access-Control-Allow-Origin, and a second one makes the browser reject the response
+	# ("Failed to fetch") even though curl succeeds; the explorer page hit exactly that.
+	# Origin is "*" on purpose: these endpoints are read-only and public (no cookie, no auth, no secret).
+	# Restricting them protects nothing and breaks legitimate front-ends (preview deploys, www., local
+	# development). The paid path (/demo) keeps its strict origin.
+	handle_path /rpc* {
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type"
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
+		reverse_proxy chain:26657
+	}
+	handle_path /rest* {
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type"
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
+		reverse_proxy chain:1317
+	}
+	# Network capacity registry: nodes POST their hardware probe here, and the /network page GETs the
+	# aggregate. `handle`, not `handle_path`: the upstream serves the /capacity path itself.
+	handle /capacity* {
+		# Read-only public aggregate, like /rpc and /rest: no key, no secret. The /network page and the
+		# chat's capacity panel both GET it from the browser.
+		@preflight method OPTIONS
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type"
+		}
+		respond @preflight 204
+		reverse_proxy capacity:8092
+	}
+	# Final Testnet Season programme. Read-mostly public data; every write is signed by a
+	# miner's operator key, so "*" grants nothing a page could abuse. `handle`, not `handle_path`: the
+	# service serves the /final-season prefix itself. Its /internal route is not under this prefix and is
+	# never proxied.
+	handle /final-season/* {
+		@preflight method OPTIONS
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type, X-Dendra-Miner, X-Dendra-Height, X-Dendra-Pubkey, X-Dendra-Sig, X-Dendra-Acct, X-Dendra-Seq"
+		}
+		respond @preflight 204
+		reverse_proxy final-season:8093
+	}
+	# The network's description files, read-only and with no key: the same bytes publish_network.sh writes and
+	# the plain-HTTP server on :8088 serves, here over TLS. Declared before the catch-all, which answers 401.
+	handle /network-info.txt {
+		root * /srv/published
+		file_server
+	}
+	handle /genesis.json {
+		root * /srv/published
+		file_server
+	}
+	handle {
+		# Bring-your-own-key endpoint. "*" lets any chat-completions client call it from a browser:
+		# the caller's page sends a key it already holds, and no cookie is ever attached.
+		@preflight method OPTIONS
+		header {
+			>Access-Control-Allow-Origin "*"
+			>Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			>Access-Control-Allow-Headers "Content-Type, Authorization"
+			>Access-Control-Max-Age "86400"
+		}
+		respond @preflight 204
+		reverse_proxy gateway:8651
+	}
+}
+
+# The Proof: read-only verifiability feed (recent jobs, pools, VRF health; no secrets).
+testnet-proof.dendranetwork.com {
+	import security_headers
+	reverse_proxy proof:8090
+}

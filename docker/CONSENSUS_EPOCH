@@ -1,0 +1,253 @@
+15
+# Consensus epoch: bump this number (line 1) on every consensus-breaking change.
+# Read by deploy/launch/launch_public.sh (guard 3c): deploying an epoch different from the one the
+# running chain was started with, without DENDRA_FRESH=1, is a replay, which ends in an AppHash panic
+# and a fork. On the launcher path a bump therefore means a fresh genesis: the running state cannot be
+# carried over.
+#
+# That holds for the launcher path, not for every path. Rebuilding the image and restarting on an
+# existing volume replays the history with the new binary, which is why guard 3c refuses it. A governed
+# upgrade plan does not replay: the chain halts at a height, operators swap the binary, and the handler
+# applies from that height onward. `chain/app/upgrades.go` carries that path and `chain/app/app.go`
+# calls its registration, so it is reachable. Only the replay destroys the chain; reading this file as
+# "reset or nothing" would cost a network.
+#
+# Line 1 names the state machine this tree builds, and it moves in the tree that brings the new binary,
+# not at the height where a network adopts it. What a running network runs is read elsewhere: the marker
+# deploy/launch/launch_public.sh writes after a deployment and the CONSENSUS_EPOCH line of
+# network-info.txt. Between the release of a new epoch and the governed upgrade the two differ on
+# purpose, and the readers of this line act on that difference:
+#   - deploy/testnet-miner/kit_update.sh applies a release of the same epoch as a kit update and stages a
+#     release of a higher epoch without applying it; deploy/testnet-miner/node_upgrade_watch.sh applies
+#     the stage when the node halts at the height of a plan the staged tree registers;
+#   - deploy/join.sh::verify_consensus_epoch refuses a tree of another epoch than the one network-info.txt
+#     declares, except one epoch ahead under --after-upgrade, for a plan this tree registers, once that plan
+#     is answered applied or this kit's node stands at its halt (deploy/join.sh::after_upgrade_applied);
+#   - deploy/join.sh::node_plan_gate refuses to rebuild, on this tree's binary, a node that holds the chain
+#     below the height where the network applied a plan of this tree;
+#   - deploy/join.sh::node_compose_up rebuilds, or moves to this tree's pinned image, the node of an
+#     existing volume when the epoch is the same, since that is a kit update.
+# A new state machine under the old number would be applied as an ordinary update by every kit whose
+# automatic update is on, and its node would apply the new rules from its next block with no plan and no
+# migration (the comment above `UpgradeEpoch15` in `chain/app/upgrades.go`), then fork from the
+# validator at the first block where the two rule sets differ.
+# The named plans live in `upgradePlans` of `chain/app/upgrades.go`. The plans of the chains before
+# epoch 14 are gone with those chains; the list holds `epoch-15-jurors-are-judges`.
+# On a network, `dendrad query upgrade applied epoch-15-jurors-are-judges` answers the height it ran at; a
+# network that has not applied it answers no height, which reads as 0 (proto3 omits a zero).
+#
+# Epoch contents:
+#  15 = jurors are declared judges that vote, reaching `dendra-testnet` through the governed
+#       upgrade `epoch-15-jurors-are-judges` (`chain/app/upgrades.go::UpgradeEpoch15`), not a fresh
+#       genesis.
+#       (1) `MsgDeclareJudge`, signed by the miner's operator
+#       (`chain/x/jobs/keeper/msg_server_declare_judge.go::DeclareJudge`). Four new stores per miner:
+#       the declaration, its height, the height of its last verdict and the draws it did not answer, all
+#       cleared at exit and eviction (`chain/x/jobs/keeper/judge.go::clearJudgeState`). The declaration
+#       and the count travel at export (genesis fields 31 and 32); the two heights do not, and an import
+#       dates every declared judge at the import anchor.
+#       Read by `dendrad query jobs miner-judge <miner_id>` (`chain/x/jobs/keeper/query_miner_judge.go::MinerJudge`).
+#       (2) The audit jury and the re-adjudication jury seat declared judges only, whose last verdict or
+#       declaration is inside `judge_verdict_window_blocks` (48) of the draw height, and which were not
+#       seated on `judge_missed_draws_max` (49) concluded audits without answering
+#       (`chain/x/jobs/keeper/judge.go::eligibleAsJudgeAt`). A new declaration resets that count. The
+#       primary draw, the two-thirds bar, the deferral and the unwind are unchanged, and a jury anchored
+#       before the upgrade keeps its seats.
+#       (3) `MsgProveAvailability` carries `kit_version` (field 5), refused below `min_kit_version` (47)
+#       when that parameter is above 0 (`chain/x/jobs/keeper/msg_server_prove_availability.go::ProveAvailability`).
+#       (4) `avail_sample_bps` (50) and `committee_min_vrf_power_bps` (51); the seed health query answers
+#       the bar in force (its field 8).
+#       (5) `rpc SettleJob` and its messages are removed. The emission counter `security_pool` is renamed
+#       `security_distributed_total`: same field number, so the stored state does not move, but its JSON key
+#       moves with the name, and this codec refuses a genesis that still writes `security_pool`. `x/emission`
+#       gains the `Pools` query.
+#       (6) The migration: `x/jobs` moves from module version 1 to 2 (`chain/x/jobs/module/module.go::ConsensusVersion`)
+#       and `chain/x/jobs/keeper/migrations.go::Migrate1to2` writes the five new parameters at 0 and no other
+#       state. At 0, `min_kit_version` refuses no proof, `avail_sample_bps` asks every miner for a proof as
+#       before, and the two judge parameters and the seed bar select their compiled values
+#       (`effectiveJudgeVerdictWindow`, `effectiveJudgeMissedDrawsMax`, `effectiveMinVrfContributorPowerBps`).
+#       Pinned by `chain/app/upgrade_epoch15_test.go`, `chain/x/jobs/keeper/adr059_judges_test.go`,
+#       `chain/x/jobs/keeper/migrations_test.go`, `chain/x/jobs/types/params_epoch15_test.go` and
+#       `chain/x/emission/keeper/epoch15_test.go`.
+#  14 = the relaunch batch, reaching `dendra-testnet` through a fresh genesis.
+#       (1) Below the jury floor a job opens when `audit_unwind_blocks > 0` and `hold_bps = 10000` in
+#       optimistic mode: an audited job there can only end in a refund, so the refusal protected nothing
+#       and kept a small network from serving at all. One eligible miner is still required.
+#       (2) The missing-seed deferral calls the same unwind as the two other deferrals.
+#       (3) On the optimistic path, a job's subsidy right (`Demand`) is credited at finality, no longer
+#       at settlement (the authority-only `SettleJob` vestige was left unchanged here; epoch 15 retires it).
+#       (4) The protocol cut is retained per job and paid at finality (the validators' share to
+#       fee_collector, the team's share to the new `team_address`, field 42, empty = counted in Pools as
+#       before, the treasury's share into Pools), or returned to the client on a refund. Four new stores
+#       (`held_validator_share`, `held_team_share`, `held_treasury_share`, `held_demand`), carried at
+#       export (genesis fields 27-30). The anti-wash bound now counts the validators' share as
+#       recoverable by a staking washer.
+#       (5) With availability windows armed, only a miner that proved presence in the current or the
+#       previous window is drawn (primary, audit jury, redo jury) or counted at admission. New store
+#       `miner_last_present_epoch`, written by MsgProveAvailability.
+#       (6) Four constants become parameters, 0 selecting the compiled value: `job_expiry_blocks` (43),
+#       `work_committee_size` (44), `assignment_stake_cap_multiple` (45), `audit_committee_draw_size` (46).
+#       (7) `x/auth/vesting` is no longer wired, and the dead upgrade plans are gone.
+#       Also in this batch: a cheat proven after finality is refunded out
+#       of the bond on the permissionless path too; a job the audit lottery selected is no longer
+#       released by a human dispute; a resolved job can no longer be disputed; governance resolution
+#       settles the retention; `Payout` is refused in optimistic mode; a foreign-prefix `team_address`
+#       is refused where params enter the store.
+#       Pinned by `chain/x/jobs/keeper/epoch14_test.go` and `chain/x/jobs/types/params_epoch14_test.go`.
+#  13 = a retention that no audit can ever conclude could only be deferred, forever.
+#       Governed `audit_unwind_blocks`, 0 = dormant. At zero proto3 omits the parameter, so the stored
+#       Params serialise to the same bytes and every deferral behaves as before: the bump is there for
+#       the day governance arms it. An older binary would ignore field 41 and keep deferring while a newer
+#       one unwinds, which is a fork.
+#       Once armed, and only past the age: the client is refunded (`refundRetainedToClient`), the dispute
+#       bond is returned because no instance remains (the rule `resolveDisputedAudit` already states),
+#       the jurors are released, and the job is marked `+resolved+unwound`. No sanction: the stake stays
+#       intact and the miner is neither paid nor slashed. The date fails closed: `HeldSince` unreadable,
+#       absent while a debt exists, or ahead of the current height all defer as before.
+#  12 = admission, exit and the redo jury each consulted a set other than the one that decides.
+#       - Admission. `enoughEligibleMinersToVerify` built its floor from the raw `audit_min_quorum` and
+#         abstained at zero, while `effectiveSlashFloor`, the function the draw asks, returns 4 at zero.
+#         Before the fix, in optimistic mode, a job with four eligible miners was accepted, its escrow
+#         taken and its pool frozen; pools freeze at birth and never widen, so no jury it could
+#         draw would ever reach the floor. The floor is now `effectiveSlashFloor(p) + 1`, and the refusal
+#         names the effective floor rather than the raw parameter.
+#         Reachable at quorum zero only: the live chain governs `audit_min_quorum` to 4 and already
+#         demanded five. The epoch still moves because it identifies the function, and one
+#         MsgUpdateParams decides which branch is taken.
+#         Covered by quorum_zero_pool_floor_test.go (the refusal, the control that one more eligible
+#         miner is accepted, and that a refused job freezes no pool and books no fee). The fix also
+#         corrected 23 fixtures that opened jobs into pools that could never supply a jury.
+#       - Work committee. The pool freeze fixed who may be drawn and when vitality is evaluated, but the
+#         ordering weight was still read live from the miner record, so slashing a member for an
+#         unrelated job reshuffled an open job's committee ([cm2 cm1 cm5] became [cm2 cm5 cm6]) and the
+#         settlement then refused an incomplete committee. The committee is now anchored in its own
+#         collection (`work_committee`, carried by genesis) and read from there. It has its own store
+#         because three consumers read every entry of `audit_committee` as a jury seat.
+#         It is anchored at the first moment it exists, not at `OpenJob`: with a reveal delay the beacon
+#         seed is not there yet, so the anchoring happens in the EndBlocker that reveals it. Both hooks
+#         are driven end to end. Covered by committee_weight_not_frozen_test.go, with a non-member control.
+#       - Client settlement. `SettlePay` pays the winners from the client's own wallet (unchanged), but
+#         it appended `+settled`, which is terminal: `expireUnservedJob` refunds only a state that is
+#         exactly "open", and `Payout`, `SettleSemantic` and `SettleJob` (retired at epoch 15)
+#         all refuse through `jobIsPaid`.
+#         The client paid twice and the escrow `OpenJob` took became unreachable. `SettleSemantic` is the
+#         protocol path (it judges, pays and empties the escrow); `SettlePay` is the client path. A job
+#         that still holds the escrow is now refused by `SettlePay`, and the refusal names the path that
+#         works. Refusing moves no funds, whereas releasing the escrow here would let this handler
+#         disburse module money on a client's say-so. Covered by settlepay_strands_escrow_test.go.
+#       - Exit. `hasOpenObligation` walked held fees, audit seats and disputed jobs but read neither
+#         `Commit` nor the work committee, so a member that had already answered could unregister; the
+#         committee was then re-derived from the live registry, `SettlePay` refused an incomplete
+#         committee, and the job kept its fee. No adversary is needed: eviction uses the same predicate.
+#         The hold is bounded by the job (paid or settled, escrow returned, resolved), never by the
+#         miner's goodwill, since an identity whose key is lost must still be able to leave.
+#       - Redo jury. The anti-collusion exclusion removed the assigned miners, while `CreateCommit`
+#         requires neither assignment nor a draw: the set that produced the contested commits is
+#         `{mid : Commit[jobId__mid] exists}`, which the adjudication re-reads when it tallies. An
+#         unassigned miner could anchor a commit and then sit on the jury that re-judged it. Authors are
+#         now excluded at both sites, together with the drawn members, and `redoSeats` subtracts the
+#         excluded so that the quorum bar shrinks with the jury.
+#  11 = `model_id` and `weights_hash` are bounded like the three commit fields beside them.
+#       `CreateCommit` bounds result_commit, prompt_commit and kind because a single transaction could
+#       otherwise carry about a mebibyte of permanent state. The two fields the model registry adds are
+#       written by the same store call and had no bound: a commit with 1 MiB in each field was accepted,
+#       and it cannot be reclaimed since DeleteCommit refuses by design (tally evasion). Blocks carry no
+#       gas limit here and validators run at a zero minimum gas price.
+#       weights_hash is bounded at 2*sha256.Size, the hex length of the digest it is compared against.
+#       model_id has no declared bound anywhere (x/modelregistry bounds neither ids nor digests), so it is
+#       anchored on the longest id the shipped configuration names (34 bytes) with room for the family;
+#       this is then the only bound in the system, and the registry should grow its own.
+#       Covered by commit_registry_fields_bounded_test.go.
+#  10 = at the vote-extension enable height itself, the PreBlocker no longer aggregates the injected
+#       envelope. Two predicates differ by one height on purpose: `voteExtensionsRecording` (>=) records
+#       this block's hash because the aggregation at E+1 reads it back, and `voteExtensionsActive` (>)
+#       decides whether extensions may be consumed. Consumption was gated on the wider one. At H == E
+#       `newProcessProposalHandler` delegates the whole block, envelope included, to `next`, which is
+#       `NoOpProcessProposal`: the default handler is built with `mempool.NoOpMempool{}`, and cosmos-sdk
+#       v0.53.6 `baseapp/abci_utils.go` (`NoOpProcessProposal`) accepts unconditionally for a NoOp
+#       mempool. Nothing validated that envelope, yet the PreBlocker wrote DecentralizedSeed and the
+#       contributor count and power from it, and `aggregateSeed` derives its 2/3 power floor from that
+#       same envelope. That seed freezes committees, so it decides who is paid.
+#       Reachable through this repository's own tooling: the rescue script sets
+#       enable_height = initial_height + 1. Refusing at E costs nothing, since CometBFT delivers
+#       extensions only from E+1, so only a forged envelope can exist there.
+#       The decision is a named function the shipped PreBlocker calls (`preBlockerMayAggregate`), so
+#       vote_extensions_enable_height_test.go can drive it; an inline check had left every test green
+#       when removed.
+#   9 = a slash cannot exceed the bond it takes from, nor a burn the fee it comes out of.
+#       `Params.Validate` bounded nine bps parameters from above; `slash_leak_bps` had a floor only
+#       (2500, optimistic mode) and `fee_burn_bps` had none. At 20000 for both, Validate returned nil, a
+#       permissionless VerifySemantic succeeded, the punished miner's bond went from 1000 to
+#       18446744073709550616, and the Treasury was credited 2000 coins the bond never held. The audit jury
+#       draw reads the raw stake (the assignment cap covers the work draw only), so the slashed cheater
+#       would take every seat, and payAvailability sums the same field to split the epoch budget.
+#       Only these two are bounded: `validator_reward_bps` is already bounded by the sum check
+#       `validator+team > 10000`, and `work_gate_bps` is above 10000 on purpose (the live chain serves
+#       15000) because it scales a subsidy against demand instead of splitting a total.
+#       Covered by slash_above_the_bond_test.go, including a legal calibration at exactly 100 %.
+#       A state transition: `MsgUpdateParams` calls `Validate`, so two binaries disagree on a params
+#       message the old one accepts.
+#   8 = a dispute system that can be opened must have a deadline, in every mode. `Params.Validate`
+#       coupled `audit_resolve_timeout` to `dispute_window` only under verification_mode=1. In k=3 mode
+#       `DisputeVerdict` gates only on `dispute_window == 0`, while the block that books the resolve
+#       appointment sits inside `if audit_resolve_timeout > 0`, so `dispute_window > 0` with
+#       `audit_resolve_timeout = 0` was a legal set: the dispute was accepted, the bond left the disputer,
+#       and no appointment existed at any height, so the job stayed +disputed forever.
+#       The clause is now general, guarded by `dispute_window > 0`; the defaults are 0/0, so a dormant
+#       dispute system trips nothing. Covered by dispute_deadline_unarmed_test.go.
+#       A state transition, not only a load-time refusal: `MsgUpdateParams` calls `Validate`
+#       (msg_update_params.go), so two binaries disagree on a params message the old one accepts.
+#   7 = SettleSemantic asks the unified anti-double-slash predicate (`jobK3Adjudicated`) instead of
+#       testing the single word "finalized". "+verified", written by VerifySemantic, matched neither that
+#       test nor `jobIsPaid`, so verify followed by settle-semantic judged the same immutable commits
+#       twice and took slash_leak_bps of the remainder: 1000 -> 200 -> 40, about 96 % of an honest
+#       miner's bond for one piece of work, on two permissionless calls.
+#       Payout guards on `jobIsPaid` alone, so a judged but unpaid job is still paid once
+#       (compound_slash_verify_then_settle_test.go::TestAVerifiedJobIsStillPayableThroughPayout).
+#       Reachable in mode 0 only: on the live chain (verification_mode=1) VerifySemantic refuses first.
+#       The epoch still moves because it identifies the function, and the mode changes with a single
+#       MsgUpdateParams.
+#   5 (suite) = the emission genesis backing guard now checks the whole identity the module declares,
+#       balance == Reserve + WorkPool + AvailPool (RunEpoch states it; only the security pool leaves the module),
+#       instead of the Reserve counter alone. Without it, a genesis declaring pools that nothing backs
+#       loads cleanly and fails at the first work or availability payment. SecurityPool is excluded on purpose:
+#       those coins are sent to fee_collector, and counting them would refuse a correct genesis
+#       (genesis_reserve_backing_test.go::TestGenesisRefusesUnbackedPools and
+#       ::TestGenesisAcceptsAWithdrawnSecurityPool). A load-time refusal, not a state transition: it
+#       cannot fork a running chain, but it can refuse a genesis that an earlier binary loaded.
+#   5 = job expiry no longer reads a bare key prefix as service. `CreateCommit` checks that the signer is
+#       the operator of the miner it names, never that this miner was assigned to the job, so any
+#       registered miner could anchor `<jobId>__<itsOwnId>` on someone else's open job, and the expiry
+#       read that key as "served": the client was never refunded and the escrow stayed unreachable. The
+#       walk now counts only commits from miners the draw assigned (`assignedCommittee`), and a job that
+#       is served but not yet settled is rescheduled instead of dropped from the queue. An underivable
+#       committee (deferred reveal pending, unreadable pool) is unknown, so it reschedules too.
+#       Covered by `job_expiry_test.go::TestExpiryACommitOUTSIDETheCommitteeDoesNotCountAsServed`.
+#       Consensus-breaking: EndBlock takes different state transitions, so both validators had to be
+#       upgraded together; one node alone on this epoch forks at the first job that expires.
+#   4 = measured: a node built from this tree, replaying the live chain (height 23272, app_version
+#       v0.1.2-612-g9607402-dirty) from its own served genesis, diverges within the first blocks:
+#       "wrong Block.Header.AppHash. Expected A110C59002C450908852B68A12E2867307F4DA367AE9DFD
+#       69D59C24426444A43, got 0176C0B0DDF4E50AF4CB336C288BC8756A2592D2DD8DC7BD2CCFF94CA269AE9D".
+#       The epoch asserts that the previous state cannot be carried over, and here that is a measurement.
+#       What changed: escrow expiry (the dead commit guard, and paying a job whose escrow was already
+#       returned is now refused); the reveal and job-expiry EndBlocker walks became ranged and capped,
+#       with the beacon-freeze deferral consuming its own orphans; frozenPoolAnchor applied at both call
+#       sites (genesis import and OpenJob), so a miner registering in the opening block is outside the
+#       pool the job freezes, and the floor guard now counts at that anchor with the pool's own
+#       predicate; OpenJob enforces JobId uniqueness and appoints nobody at fee 0; Params.Validate
+#       refuses verification_mode=1 with committee_reveal_delay=0; emission InitGenesis refuses a
+#       Reserve counter the module account does not back (DENDRA_ALLOW_UNBACKED_RESERVE=1 downgrades
+#       that refusal to a warning for someone joining an already-unbacked network; it only reads and
+#       writes no state, so it cannot change what the chain agrees on); modelregistry InitGenesis calls
+#       genState.Validate().
+#   1 = anchored committee + 2/3 quorum + commitRange (genesis 965d5d7c...).
+#   3 = miner_id derived from the signer address and enforced in CreateMiner, and
+#       committee_reveal_delay actually passed to the chain container. Both are genesis-level: an
+#       existing chain cannot adopt either without a fresh genesis.
+#   2 = C1..M8, double slash k=3, audit partition (audits_opened counter, +adjudicated marker,
+#       audit_distinct_voters, vitality windows moved into params, assigned-committee and
+#       audit-deferred queries, extended genesis); vindication at the relative bar and sub-quorum
+#       => deferral (end of clawback-on-silence), the AdjudicateDispute twin closed,
+#       audit_voters/audit_max_operator_votes, HeldSince and the held-summary query,
+#       genesis held_since_elapsed.

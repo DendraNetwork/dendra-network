@@ -1,0 +1,339 @@
+package keeper
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"math/bits"
+
+	"cosmossdk.io/collections"
+	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/DendraNetwork/dendra-network/chain/x/jobs/types"
+)
+
+// runAvailabilityEpoch is called on every block by EndBlock. When availability is enabled
+// (avail_epoch_blocks>0) and the height is an epoch boundary, it (1) pays out the AvailPool to the
+// miners proven present during the previous epoch, weighted by bond, then (2) rolls the new epoch's
+// challenge from the AppHash, which was unpredictable during the epoch that just ended. Off by default.
+func (k Keeper) runAvailabilityEpoch(ctx context.Context, h int64) error {
+	params, err := k.Params.Get(ctx)
+	if err != nil {
+		return nil // no params: nothing to do
+	}
+	eb := int64(params.AvailEpochBlocks)
+	if eb <= 0 || h <= 0 || h%eb != 0 {
+		return nil // availability off, or not an epoch boundary
+	}
+	epoch := h / eb
+
+	// (1) Slashable liveness: slash the bonded miners that did not prove their availability
+	//     during the previous epoch, before payAvailability purges the presence records. Dormant while
+	//     avail_slash_bps==0.
+	if epoch >= 1 {
+		if err := k.runAvailabilitySlash(ctx, epoch-1, params); err != nil {
+			return err
+		}
+		if err := k.payAvailability(ctx, epoch-1, params.AvailPayoutBps, params.AvailRequireDemand, params.VerificationMode == 1); err != nil {
+			return err
+		}
+	}
+
+	// (2) Roll the new epoch's challenge: the AppHash of this block, unpredictable during the epoch that
+	//     just ended.
+	challenge := hex.EncodeToString(sdk.UnwrapSDKContext(ctx).HeaderInfo().AppHash)
+	if challenge == "" {
+		challenge = "genesis" // fallback when the AppHash is empty (very start of the chain)
+	}
+	if err := k.AvailChallenge.Set(ctx, challenge); err != nil {
+		return err
+	}
+	return k.AvailChallengeHeight.Set(ctx, h)
+}
+
+// availChallengeEpoch is the one definition of the availability epoch whose challenge is in force in
+// `ctx`. ProveAvailability records a proof under it and starts the answer deadline from it; the
+// GetAvailChallenge query reports it next to the challenge.
+//
+// The epoch of a height is h / avail_epoch_blocks, except at a boundary height. There the challenge
+// rolls in EndBlock, after the block's transactions, and two contexts share the height. A transaction
+// of the block still answers the challenge of the epoch the block closes, which runAvailabilityEpoch
+// pays and slashes in that same EndBlock: it counts for h/eb - 1. A context built on the block's
+// committed state (CheckTx, the simulation behind `--gas auto`, a query) already holds the next
+// challenge: it counts for h/eb. The roll height written with the challenge tells the two apart.
+//
+// No entry means this binary has rolled no challenge yet, hence none at this height: the challenge in
+// state was rolled at an earlier boundary, and h/eb - 1 holds. That is the case of the first blocks
+// after the epoch 15 upgrade, before their first boundary, and of a state imported by genesis (the
+// entry is not exported), so neither needs a migration.
+//
+// One committed state reads that absence wrongly: the halt before the upgrade height U when U-1 is a
+// boundary. The epoch 14 binary rolled the challenge of (U-1)/eb in that EndBlock and wrote no entry,
+// so until block U commits, the query and CheckTx both count it one epoch lower. It is left as is,
+// because the two agree: the miner daemon compares the reported epoch with the height
+// (services/miner.py, avail_window), reads the answer as stale and asks again at block U,
+// where both read U/eb. A correction in the query alone would make the daemon send a proof that CheckTx
+// counts one epoch lower and refuses as too late once avail_deadline_blocks is armed, and the daemon
+// then settles that challenge as closed for its whole window.
+func (k Keeper) availChallengeEpoch(ctx context.Context, eb int64) (int64, error) {
+	h := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	epoch := h / eb
+	if h <= 0 || h%eb != 0 {
+		return epoch, nil
+	}
+	rolled, err := k.AvailChallengeHeight.Get(ctx)
+	if errors.Is(err, collections.ErrNotFound) {
+		return epoch - 1, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if rolled == h {
+		return epoch, nil
+	}
+	return epoch - 1, nil
+}
+
+// payAvailability distributes a fraction (payoutBps) of the AvailPool among the miners proven present
+// at `epoch`, weighted by bond. The weighting makes it anti-sybil: splitting a stake across identities
+// does not multiply the revenue. Shares are computed in big.Int to rule out overflow, and the
+// integer-division remainder stays in the pool. Presence records for the epoch are purged whether or
+// not a payout happened.
+func (k Keeper) payAvailability(ctx context.Context, epoch int64, payoutBps uint64, requireDemand bool, requireVrf bool) error {
+	type present struct {
+		operator string
+		stake    uint64
+	}
+	var miners []present
+	var allKeys []collections.Pair[int64, string]
+	var totalStake uint64
+	rng := collections.NewPrefixedPairRange[int64, string](epoch)
+	if err := k.Available.Walk(ctx, rng, func(key collections.Pair[int64, string]) (bool, error) {
+		allKeys = append(allKeys, key)
+		if m, e := k.Miner.Get(ctx, key.K2()); e == nil {
+			// With avail_require_demand set, only miners that served real demand (demand>0) are paid, so
+			// liveness alone (echoing the AppHash, which can be farmed without a GPU) earns nothing. The
+			// presence record is purged below regardless.
+			if requireDemand && m.Demand == 0 {
+				return false, nil
+			}
+			// Defence at payout time: no vrf_pubkey in incentivised mode means no share, even if
+			// a stale presence record lingered. The primary gate is in ProveAvailability; this is the
+			// second line.
+			if requireVrf && m.VrfPubkey == "" {
+				return false, nil
+			}
+			miners = append(miners, present{operator: m.Operator, stake: m.Stake})
+			totalStake += m.Stake
+		}
+		return false, nil
+	}); err != nil {
+		return err
+	}
+
+	// Budget = a fraction of the current AvailPool, distributed pro rata to bond.
+	if payoutBps > 0 && totalStake > 0 {
+		poolBal, err := k.emissionKeeper.AvailPoolBalance(ctx)
+		if err != nil {
+			return err
+		}
+		// The budget stays in math.Int with an explicit guard before any uint64 conversion: never
+		// negative, and bounded by poolBal since payoutBps<=10000. The split itself uses big integers.
+		budgetI := math.NewIntFromUint64(poolBal).Mul(math.NewIntFromUint64(payoutBps)).QuoRaw(10000)
+		if !budgetI.IsNegative() && budgetI.IsPositive() {
+			totalI := math.NewIntFromUint64(totalStake)
+			for _, p := range miners {
+				shareI := budgetI.Mul(math.NewIntFromUint64(p.stake)).Quo(totalI)
+				if !shareI.IsPositive() || !shareI.IsUint64() {
+					continue
+				}
+				share := shareI.Uint64()
+				opBz, e := k.addressCodec.StringToBytes(p.operator)
+				if e != nil {
+					continue
+				}
+				if _, e := k.emissionKeeper.PayAvail(ctx, sdk.AccAddress(opBz), share); e != nil {
+					// Best-effort, like every other payout in the EndBlocker (slashCheatedPrimary,
+					// clawbackPayment, releaseHeld). Propagating this error would halt the chain over a
+					// single failed availability payout, so the miner is skipped, not the block.
+					sdk.UnwrapSDKContext(ctx).Logger().Error("payAvailability: PayAvail failed -> miner skipped (best-effort)",
+						"operator", p.operator, "epoch", epoch, "err", e.Error())
+					continue
+				}
+			}
+		}
+	}
+
+	// Purge the epoch's presence records, paid or not.
+	for _, key := range allKeys {
+		if err := k.Available.Remove(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runAvailabilitySlash implements slashable liveness, for all bonded miners, with the proceeds
+// burned. There is no solo semantic check on purpose: a public reference answer would be precomputable
+// and would not prove that a GPU exists. Output quality stays guarded by the work audit and by
+// AvailRequireDemand. At an epoch boundary, for every bonded miner, being absent from the previous
+// epoch's presence records (not having answered the VRF proof on the unpredictable challenge in time)
+// counts as one failure.
+//
+// Sliding-window bitmask: per miner, a 64-bit bitmask of the recent epochs (bit 0 = current epoch, bit
+// i = i epochs ago), shifted left on every epoch processed. A slash fires when
+// popcount(mask & window W) >= avail_fail_k, that is, at least k absences in any span of W epochs. A
+// tumbling window only counted within fixed spans, so a chronic absentee could place (k-1) absences
+// before a boundary and (k-1) after it without being slashed, gaming the reset, and sustain (k-1)/W
+// absence forever with the right timing. The sliding window leaves no boundary to play.
+//
+// Storage reuses AvailFailCount (now the bitmask) and AvailFailWindowStart (now the last epoch
+// processed). Both are uint64, so no proto regeneration is required, and the semantics may change
+// because the slash is dormant everywhere, with no armed state to migrate. Constraint:
+// avail_fail_window <= 64 when armed, the capacity of the mask, enforced by Validate.
+//
+// The slash is bounded by min(stake*avail_slash_bps/10000, avail_slash_max) and burned: there is no
+// victim to compensate here, so deterrence stays purely deflationary and no beneficiary has an
+// incentive to over-slash. The mask is reset after a slash, granting k epochs of grace and bounding the
+// slash rate. avail_fail_k>1 is the anti-false-positive rule: an isolated network or latency failure
+// never slashes. The whole mechanism is dormant while avail_slash_bps==0, and Validate requires the
+// complete machinery at activation. Epoch 0 (bootstrap, no challenge rolled yet) is exempt. k and W
+// must be recalibrated for a sliding window rather than a tumbling one, because the false-positive
+// rate per evaluated epoch changes: see tokenomics/avail_slash_calibration_sliding.py and
+// the artifact bench-results/avail-slash-calibration-sliding.json.
+//
+// Limits: (a) deterrence is economic, not absolute: an adversary willing to absorb recurring slashes
+// (5 % plus the unpaid absence) can sustain a density above (k-1)/W; (b) an unbonded miner carries no
+// obligation, and its off-bond epochs slide in as zeros, ageing like presence, so unbonding is no
+// laundering shortcut; (c) rotating a minerId resets the mask, which existing friction limits (Demand
+// reset and probation), and binding the mask to the operator instead would penalise legitimate
+// multi-GPU setups.
+func (k Keeper) runAvailabilitySlash(ctx context.Context, epoch int64, params types.Params) error {
+	if params.AvailSlashBps == 0 || params.AvailFailK == 0 || params.AvailFailWindow == 0 {
+		return nil // dormant
+	}
+	if epoch < 1 {
+		return nil // epoch 0 = bootstrap: no challenge was rolled before the first boundary, nobody could prove
+	}
+
+	// Presence proofs delivered in time during the epoch that just ended.
+	present := make(map[string]struct{})
+	if err := k.Available.Walk(ctx, collections.NewPrefixedPairRange[int64, string](epoch),
+		func(key collections.Pair[int64, string]) (bool, error) {
+			present[key.K2()] = struct{}{}
+			return false, nil
+		}); err != nil {
+		return err
+	}
+
+	e := uint64(epoch) // epoch being processed (>= 1)
+	// Epoch 15 (`avail_sample_bps`): the obligation is drawn on the challenge of the epoch
+	// being processed, which is still the current one here (the roll to the next epoch happens after
+	// this pass, in runAvailabilityEpoch). Armed and with no readable challenge, the draw cannot be
+	// established, so nobody is billed this epoch: an unknown draw never records a failure. Dormant at
+	// 0, where the challenge is not read and everyone owes a proof.
+	challenge := ""
+	if params.AvailSampleBps > 0 {
+		cur, cErr := k.AvailChallenge.Get(ctx)
+		if cErr != nil || cur == "" {
+			sdk.UnwrapSDKContext(ctx).Logger().Error("avail_sample_bps armed but no readable challenge for this epoch -> no availability failure recorded this epoch (an unknown draw bills nobody)",
+				"epoch", epoch)
+			return nil
+		}
+		challenge = cur
+	}
+	w := params.AvailFailWindow
+	var winMask uint64
+	if w >= 64 {
+		w = 64 // bitmask capacity; Validate bounds the armed value to <= 64, this clamp is defensive
+		winMask = ^uint64(0)
+	} else {
+		winMask = uint64(1)<<w - 1
+	}
+	var toSlash []string
+
+	// First pass: update the bitmasks (sliding window). Miner entries are not mutated during the walk.
+	if err := k.Miner.Walk(ctx, nil, func(minerId string, m types.Miner) (bool, error) {
+		if m.Stake == 0 || m.Stake < params.MinStake {
+			return false, nil // not bonded: no availability obligation; skipped epochs slide in as zeros
+		}
+		var mask uint64
+		last, errL := k.AvailFailWindowStart.Get(ctx, minerId)
+		if errL == nil && last < e {
+			gap := e - last // >= 1; greater than 1 if the miner was unbonded (epochs without obligation are zeros)
+			if prev, errC := k.AvailFailCount.Get(ctx, minerId); errC == nil && gap < 64 {
+				mask = prev << gap
+			}
+		}
+		// errL != nil (first time) or last >= e (should not happen, epochs strictly increase): mask = 0
+		// A miner not drawn this epoch owes no proof: its absence is not a failure and the epoch slides
+		// into its mask as a zero, like an epoch without a bond. A proof it sent anyway was recorded as
+		// presence by ProveAvailability and paid like any other.
+		if _, proved := present[minerId]; !proved && availabilityProofOwed(challenge, e, minerId, params.AvailSampleBps) {
+			mask |= 1 // absent at epoch e, and owed a proof
+		}
+		mask &= winMask // only the last W epochs count; older ones expire as the window slides
+		if uint64(bits.OnesCount64(mask)) >= params.AvailFailK {
+			toSlash = append(toSlash, minerId)
+			mask = 0 // reset after a slash: k epochs of grace before another one, bounding the rate
+		}
+		// Anti-churn: a clean miner (mask=0) stores nothing; its trace is purged instead of rewritten
+		// every epoch, since no entry is equivalent to a zero mask (see errL above). The honest majority
+		// costs no state write per epoch; only miners with recent absences carry an entry.
+		if mask == 0 {
+			if errL == nil { // a trace existed: purge it
+				if err := k.AvailFailCount.Remove(ctx, minerId); err != nil {
+					return true, err
+				}
+				if err := k.AvailFailWindowStart.Remove(ctx, minerId); err != nil {
+					return true, err
+				}
+			}
+			return false, nil
+		}
+		if err := k.AvailFailCount.Set(ctx, minerId, mask); err != nil {
+			return true, err
+		}
+		if err := k.AvailFailWindowStart.Set(ctx, minerId, e); err != nil {
+			return true, err
+		}
+		return false, nil
+	}); err != nil {
+		return err
+	}
+
+	// Second pass: apply the slashes (mutate Miner and burn) after the walk.
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	for _, minerId := range toSlash {
+		m, err := k.Miner.Get(ctx, minerId)
+		if err != nil {
+			continue // miner disappeared in the meantime
+		}
+		amt := m.Stake * params.AvailSlashBps / 10000
+		if mx := params.AvailSlashMax; mx > 0 && amt > mx {
+			amt = mx
+		}
+		if amt == 0 {
+			continue
+		}
+		m.Stake -= amt
+		if err := k.Miner.Set(ctx, minerId, m); err != nil {
+			return err
+		}
+		// Burn from the module account that holds the bonds, keeping the books balanced (sum of stakes ==
+		// module balance) and the effect deflationary. Best-effort: propagating a burn failure would halt
+		// the chain inside the EndBlocker. The stake is already decremented, so a failed burn leaves the
+		// module over-collateralised (balance > sum of stakes), the safe direction, since no miner ends
+		// up under-backed. Log and skip; do not stop the block.
+		if err := k.bankKeeper.BurnCoins(ctx, types.ModuleName,
+			sdk.NewCoins(sdk.NewCoin("udndr", math.NewIntFromUint64(amt)))); err != nil {
+			sdkCtx.Logger().Error("availability: BurnCoins failed -> not burned (best-effort, module over-collateralised)",
+				"miner", minerId, "amount", amt, "epoch", epoch, "err", err.Error())
+			continue
+		}
+		sdkCtx.Logger().Info("availability: miner slashed for missed liveness, amount burned",
+			"miner", minerId, "amount", amt, "epoch", epoch)
+	}
+	return nil
+}
