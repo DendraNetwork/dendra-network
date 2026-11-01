@@ -1,0 +1,29 @@
+# The versions and signing-key fingerprints of what deploy/install.sh downloads and installs on a host.
+#
+# Read by deploy/install.sh (pins_load) as KEY=VALUE lines, never sourced. Each key is named once, and its value
+# has a fixed form. A file that is missing, a key named twice or not at all, or a value outside its form stops
+# the install before anything is downloaded from these repositories: nothing falls back to the newest version.
+# The file is part of the release tag, so the tag's signature covers it (docker/RELEASE_SIGNERS). install.sh
+# reads the copy next to it, or, when it was downloaded alone, the copy in the clone it places on that tag.
+#
+# What a pin changes: a host where install.sh installs Docker or the NVIDIA container toolkit gets exactly these
+# versions, from a repository whose signing key has exactly this fingerprint. An Engine or a toolkit already
+# installed is kept as it is, whatever its version.
+#
+# A signing key's fingerprint is the primary key's, as `gpg --show-keys --with-colons <key file>` prints it on
+# the first `fpr` line after `pub`: 40 uppercase hex digits.
+
+# Docker, from https://download.docker.com/linux/<ubuntu|debian> (the key at .../gpg). A version is the upstream
+# number: install.sh takes the one build of it that the repository offers for the host's codename, and refuses
+# when there is none.
+DOCKER_APT_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+DOCKER_ENGINE_VERSION=29.6.1
+DOCKER_CONTAINERD_VERSION=2.2.5
+DOCKER_BUILDX_VERSION=0.35.0
+DOCKER_COMPOSE_VERSION=5.3.0
+
+# NVIDIA container toolkit, from https://nvidia.github.io/libnvidia-container (the key at .../gpgkey). The version
+# is the full package version, the same for its four packages (nvidia-container-toolkit, its -base package,
+# libnvidia-container-tools and libnvidia-container1).
+NVIDIA_APT_KEY_FINGERPRINT=C95B321B61E88C1809C4F759DDCAE044F796ECB0
+NVIDIA_CONTAINER_TOOLKIT_VERSION=1.19.1-1

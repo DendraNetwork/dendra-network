@@ -1,0 +1,149 @@
+{
+ "decision": "Owner decision of 2026-10-30: pay every day an identity was paid nothing for the missing signed capacity report alone, since the notice was never posted; this amendment covers days 18 and 19",
+ "id": 2,
+ "reason": "Kit v0.2.2 resent the signed capacity report only through a crontab line that it never started nor checked, and the identities were not told; each identity proves its kit by a deposit of that day",
+ "rows": [
+  {
+   "address": "dendra1nyc30ej93qwmz8ysmmqexx5we9hk2sly4n8lyp",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793027169026",
+    "kit_version": 3
+   },
+   "miner_id": "dm14459akfhllw8qwmg5576kl",
+   "udndr": 1420000
+  },
+  {
+   "address": "dendra18xaqqetez5fuv5cqyk0jsjwnzr6ulwu85hm9zm",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793017243979",
+    "kit_version": 3
+   },
+   "miner_id": "dm1aj8aal8fygfs9qvr54j8qx",
+   "udndr": 1320000
+  },
+  {
+   "address": "dendra17ga4tzjegscwjhscwr0hut7wga0vep79m9jcdu",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793027552240",
+    "kit_version": 3
+   },
+   "miner_id": "dm1e4aqeecsjlzuqzc0n5te89",
+   "udndr": 1120000
+  },
+  {
+   "address": "dendra1940sgqg08qrq74m2fywlp2q6vvrxthxku8mrgg",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793094209635",
+    "kit_version": 3
+   },
+   "miner_id": "dm1e6c93erve7u9892lpuj9sr",
+   "udndr": 1452000
+  },
+  {
+   "address": "dendra16j5855u6wmy2rwna4z2f07mp5d6d2tgf6wzz3g",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793022252505",
+    "kit_version": 3
+   },
+   "miner_id": "dm1ev4cumspxgsy659l25sgev",
+   "udndr": 1320000
+  },
+  {
+   "address": "dendra1f9pf37tkhf3mn9fsqv64tfefrmx426vhfdmvpn",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793027359778",
+    "kit_version": 3
+   },
+   "miner_id": "dm1gtvysu8zct9h350wklclmz",
+   "udndr": 1820000
+  },
+  {
+   "address": "dendra1a400e598y4lvrlzuwelxk2eeuvjwn79d43n2l0",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793029194339",
+    "kit_version": 3
+   },
+   "miner_id": "dm1gug0yxdpgdwnffwcq4unu9",
+   "udndr": 2700000
+  },
+  {
+   "address": "dendra1q8u5m4ws7s9uqy35qev3x03kgsfp5jwmt448rk",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793019214687",
+    "kit_version": 3
+   },
+   "miner_id": "dm1gz0wd3g78w97mj027vnjaw",
+   "udndr": 3452000
+  },
+  {
+   "address": "dendra156msnrzz59gzd7g8fuhv8s37wedt9rg83dwn9v",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793033335702",
+    "kit_version": 3
+   },
+   "miner_id": "dm1jza424yjnyp0f5k93lmtts",
+   "udndr": 1620000
+  },
+  {
+   "address": "dendra174x7tml0qf66lr66sxvdk5yge0lzh7yp7zm9v7",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793016598458",
+    "kit_version": 3
+   },
+   "miner_id": "dm1lud45g0muuf5cm3altrn00",
+   "udndr": 820000
+  },
+  {
+   "address": "dendra150k00vxs96mgytap0wp4vl9lunw4dkf8zlsy76",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793028334906",
+    "kit_version": 3
+   },
+   "miner_id": "dm1nyr7wt9ycvvt38k6cwd7h2",
+   "udndr": 1120000
+  },
+  {
+   "address": "dendra1078m22v0dlz8yzjessjzmanx82vrkp7lq2zd2m",
+   "day": 18,
+   "kit_proof": {
+    "job_id": "job1793041957720",
+    "kit_version": 3
+   },
+   "miner_id": "dm1z0nemyezpvu2wjp06yk4pv",
+   "udndr": 1620000
+  },
+  {
+   "address": "dendra1940sgqg08qrq74m2fywlp2q6vvrxthxku8mrgg",
+   "day": 19,
+   "kit_proof": {
+    "job_id": "job1793103789746",
+    "kit_version": 3
+   },
+   "miner_id": "dm1e6c93erve7u9892lpuj9sr",
+   "udndr": 112000
+  },
+  {
+   "address": "dendra1a400e598y4lvrlzuwelxk2eeuvjwn79d43n2l0",
+   "day": 19,
+   "kit_proof": {
+    "job_id": "job1793135930655",
+    "kit_version": 3
+   },
+   "miner_id": "dm1gug0yxdpgdwnffwcq4unu9",
+   "udndr": 4400000
+  }
+ ],
+ "schema": 1,
+ "set_apart": []
+}
