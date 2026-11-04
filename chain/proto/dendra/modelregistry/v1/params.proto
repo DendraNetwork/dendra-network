@@ -1,0 +1,30 @@
+syntax = "proto3";
+package dendra.modelregistry.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/modelregistry/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "dendra/x/modelregistry/Params";
+  option (gogoproto.equal) = true;
+
+  // audit_judge_model. No consensus path reads this field. The kit's judge
+  // reads it off-chain, before any other source, to choose its model
+  // (`services/judge_worker.py::resolve_judge_model`), and every judge the kit seats runs that
+  // model on the CPU unless its operator sets DENDRA_JUDGE_MODEL. A jury of kit judges is therefore a
+  // jury of one model. Consensus does not enforce it: do not claim that the chain constrains the judge's
+  // model.
+  //
+  // On a bench, a jury of one model false-slashed honest miners at 1% to 19%, a rate that a mix of
+  // models brought to zero. The project accepts that residual risk, and a jury of one model is
+  // the kit's default.
+  //
+  // The admissible judge models are an allow-list enforced off-chain by the launcher's hardware probe
+  // (`deploy/hw_probe.sh`, `_is_allowed_judge`). Two resolutions remain open: drop the field and own the
+  // off-chain allow-list, or replace it with an on-chain allow-list (`repeated string`), which needs a
+  // proto regeneration and moves the guard into consensus.
+  string audit_judge_model = 1;
+}

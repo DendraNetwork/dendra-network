@@ -1,0 +1,8 @@
+# Advisories that govulncheck reports as called and that this chain accepts, one per line:
+#     <ID> <reason, mandatory, at least 40 characters: the executable path and why it is acceptable>
+# Read by scripts/govulncheck_filter.py through `make govulncheck`. A called advisory that is not
+# listed here stays red; an entry whose advisory is no longer reported at all is refused, so a
+# line here cannot outlive the thing it excuses. Accepting an advisory that has a fixed version is
+# the wrong fix: bump the dependency instead. The filter prints the entry points the scanner
+# traces for every accepted advisory, so a path that changes is visible at the next run.
+GO-2026-5932 golang.org/x/crypto/openpgp is deprecated as a whole package (Fixed in: N/A; the latest x/crypto still ships it). Sole importer in this build: cosmos-sdk crypto/armor.go (EncodeArmor, DecodeArmor). Executable path: keyring ExportPrivKeyArmor, ImportPrivKey and Rename <- client/keys export.go, import.go, rename.go <- `dendrad keys export|import|rename`. The kit runs these commands itself: the miner daemon renames its key to the identity the chain derives (miner.py::align_identity), the keyring migration exports then imports each key (modea/keyring.py::migrate), and the SDK's Rename is itself an export then an import. Each time, the armor decoded is text the same local keyring has just written. The other traces the scanner lists reach armor's unexported readers through io.Reader interface dispatch, which only armor.Decode/Encode construct. Never a message, a query, ABCI or a peer. It closes when the SDK's crypto/armor.go stops importing openpgp/armor: the scanner then stops reporting the advisory and the filter refuses this line as stale.

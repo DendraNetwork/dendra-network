@@ -1,0 +1,53 @@
+syntax = "proto3";
+package dendra.emission.v1;
+
+import "amino/amino.proto";
+import "dendra/emission/v1/params.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/DendraNetwork/dendra-network/chain/x/emission/types";
+
+// GenesisState defines the emission module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+
+  // Emission engine state. It must cross an export/import unchanged: carrying it is what keeps
+  // `InitGenesis` from resetting the reserve to its genesis value and the epoch to 0. Without it, a
+  // single export/import round trip refills an already-spent reserve (the same release schedule is
+  // paid out twice); erases the unclaimed work and availability pools, so subsidies owed to miners
+  // vanish while the coins backing them are counted back as reserve; and leaves `last_epoch = 0`
+  // against an already-high height, which fires an epoch on the first block.
+  //
+  // The field is nullable on purpose, and that is the whole subtlety: proto3 does not distinguish
+  // "absent" from "zero" on a scalar, and a legitimately exhausted reserve is zero. An optional
+  // message makes the distinction legible — absent means a fresh chain and the engine is bootstrapped;
+  // present means a resumption and the state is restored exactly, zeros included.
+  EmissionState state = 2;
+}
+
+// EmissionState — the engine state, as it must survive an export/import.
+message EmissionState {
+  uint64 reserve = 1;        // balance left in the release schedule
+  uint64 work_pool = 2;      // work subsidies released but not yet claimed
+  uint64 avail_pool = 3;     // same, for availability
+  // Security share already sent to fee_collector, cumulative. It was named `security_pool` until
+  // consensus epoch 15; the number is unchanged, the name now says that these
+  // coins have left the module and that nothing can be claimed from this counter.
+  // The JSON key moved with the name. A genesis exported by the epoch 14 binary writes
+  // `security_pool`, which this codec refuses as an unknown field, so a state meant for the epoch 15
+  // binary (the rehearsal chain, a mainnet genesis) is exported by the epoch 15 binary, or has that
+  // key renamed by hand first. The in-place upgrade reads the binary store, where only the number
+  // counts.
+  uint64 security_distributed_total = 4;
+  uint64 last_epoch = 5;     // height of the last epoch executed (schedule replay guard)
+  uint64 last_supply = 6;    // supply at the last epoch; the delta measures demand (burns)
+  // Cumulative payouts of the two claimable pools (PayWork and PayAvail), so that the emission that
+  // left the module can be split by flow (the Pools query). They start at 0 on
+  // a bootstrap and at their first payment on an upgraded chain, where absent reads as 0.
+  uint64 work_paid_total = 7;
+  uint64 avail_paid_total = 8;
+}

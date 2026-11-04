@@ -1,0 +1,46 @@
+# Dendra alerting rules.
+#
+# Every metric this stack exports is read from the chain, so a chain that stops producing blocks does
+# not turn any of them red: they simply stop changing. `dendra_block_height` is a gauge, and a frozen
+# height is still a valid non-zero number; `dendra_chain_up` stays at 1 because the RPC keeps answering.
+# Only a rate tells a frozen chain from a healthy one, and a gauge panel does not show rates.
+#
+# A stall is a real risk here. When no single validator holds two thirds of the power, stopping any
+# validator whose power the others cannot replace stops block production for everyone. Which validators
+# those are is a reading, not a constant: compare each `tokens` value from
+# /cosmos/staking/v1beta1/validators with two thirds of the bonded pool.
+#
+# A series that disappears must not read as healthy. `increase()` over a missing series returns nothing,
+# so the stall rule alone stays silent when the exporter itself dies; the second rule covers that case.
+groups:
+  - name: dendra-liveness
+    rules:
+      - alert: DendraChainStalled
+        # 5 minutes is derived from the measured interval of about 5.3 s per block: a healthy chain
+        # applies about 56 blocks in this window, so zero blocks is not just a slow round.
+        expr: increase(dendra_block_height[5m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The chain has applied no block for at least 5 minutes."
+          description: >-
+            dendra_block_height has not moved. Every other Dendra metric is read from the chain, so on a
+            stopped chain they all stay green: validators read as bonded and not jailed, and the missed
+            block counter freezes because missed blocks are only counted on blocks that get produced.
+            When no validator holds two thirds alone, one validator being down can stop production for
+            everyone, so compare the bonded split before assuming it cannot. Production resumes on its
+            own when the missing node comes back.
+
+      - alert: DendraExporterDown
+        # Without this rule the stall alert is silent when it matters most: `increase()` over a series
+        # that no longer exists returns no samples, so a dead exporter raises no alert at all.
+        expr: up{job="dendra"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The Dendra exporter is not being scraped: chain liveness is unknown, not fine."
+          description: >-
+            No metrics are arriving, so DendraChainStalled cannot fire either: it has nothing to measure.
+            Treat this as "we do not know whether the chain is producing", never as "the chain is fine".

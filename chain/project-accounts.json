@@ -1,0 +1,47 @@
+{
+  "network": "dendra-testnet",
+  "about": "The service accounts of the project on the network named above: the accounts that open, fund or pay jobs and rewards. It does not list every funded account of the genesis file. A client address in a job listing that is not on this list belongs to someone else. Every address written in the published code is listed here or is a named test vector. A new genesis needs a new list.",
+  "accounts": [
+    {
+      "name": "generator",
+      "address": "dendra1sdz96wyzv60ts2qjnkah2kqh46k7rhpq2l0cm2",
+      "key": "generator",
+      "roles": ["generator"],
+      "description": "Opens the requests of the Final Testnet Season programme and pays their fees. Every job it opens carries this address as its client.",
+      "read_with": "GET /final-season/v1/status on the testnet API, field generator."
+    },
+    {
+      "name": "gateway",
+      "address": "dendra1nr5dt32qfl6y4asm4qktq9ec3zgmx8q6z27f65",
+      "key": "gw",
+      "roles": ["gateway"],
+      "description": "Signs the jobs that the public chat gateway opens on the free tier. Its balance comes from the faucet account.",
+      "read_with": "The client field of the jobs the chat gateway opens (GET /rest/dendra/jobs/v1/job). The proof service counts them with DENDRA_PROOF_GATEWAY_ADDRESS (the_proof.py::origin_partition)."
+    },
+    {
+      "name": "faucet",
+      "address": "dendra1r57vmg24fl7q7jj5akqg83g3jm5weuzvap4y80",
+      "key": "bob",
+      "roles": ["faucet", "bootstrap"],
+      "description": "Signs the faucet drips. At launch it also seeds the gateway account once (launch_public.sh, step 7b). One key holds both roles.",
+      "read_with": "The sender of the drips: the node RPC tx_search with the query transfer.sender equal to this address. The genesis file credits the faucet float to this account."
+    },
+    {
+      "name": "season-payer",
+      "address": "dendra1dwz6zavyfl87wn724sgy3m8c3jhej3dsztu4al",
+      "key": "payout",
+      "roles": ["season-payer"],
+      "description": "Pays the Final Testnet Season rewards. Each week is paid in one or more transactions, each with many transfers; the memo of each transaction starts with dendra-final-season-week.",
+      "read_with": "The node RPC tx_search with the query message.sender equal to this address. The memos are built by final_season_payout.py::memo."
+    }
+  ],
+  "protocol_accounts": [
+    {
+      "name": "emission-reserve",
+      "address": "dendra1q6tym5h6cd3cxcqua9eflkf5rct8c6rsn92wrf",
+      "kind": "module account",
+      "description": "Holds the emission reserve. The address is derived from the module name, so no key controls it.",
+      "read_with": "entrypoint-chain.sh derives the address from the module name emission and stops the boot when it differs from the pinned one."
+    }
+  ]
+}
